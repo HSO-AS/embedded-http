@@ -12,6 +12,7 @@ extern crate alloc;
 pub mod request;
 pub mod error;
 pub mod writer;
+pub mod response;
 
 pub use error::Error;
 

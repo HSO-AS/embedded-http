@@ -123,9 +123,9 @@ impl<'a, const D: usize> Request<'a, D> {
 }
 
 
-# [cfg(all(feature = "serde_json", feature= "alloc"))]
+#[cfg(all(feature = "serde_json", feature = "alloc"))]
 impl<'a, const D: usize> Request<'a, D> {
-    pub fn build_json<W: Writer, T: Serialize>(mut self, body: T, buf: &'a mut W) -> Result<(), Error<'a>> {
+    pub fn build_json<W: Writer, T: Serialize>(mut self, body: T, buf: &'a mut W) -> Result<(), Error> {
         self = self.set_json()?;
         let body_ser = serde_json::to_string(&body)?;
 
@@ -139,7 +139,11 @@ mod tests {
     use super::*;
     #[cfg(feature = "alloc")]
     use alloc::{vec::Vec, string::String};
+
+    use core::str::from_utf8;
+
     use crate::writer::slice_writer::SliceWriter;
+
 
     #[test]
     fn build_simple() {
@@ -150,25 +154,24 @@ mod tests {
 
         req.build_header_no_body(&mut buf).unwrap();
 
-        println!("{}", String::from_utf8_lossy(buf.as_slice()));
+        println!("{}", from_utf8(buf.as_slice()).unwrap());
     }
 
     #[test]
     fn build_simple_body() {
         let mut req: Request = Request::new("google.com", "/").unwrap();
-        // let body = serde_json::json!({"hei": "hade"});
         let body = "hei";
         req.post();
-        // req.body(body);
 
 
         let mut buf = SliceWriter::new([0; 512]);
 
         req.build(body.as_bytes(), &mut buf).unwrap();
 
-        println!("{}", String::from_utf8_lossy(buf.as_slice()));
+        println!("{}", from_utf8(buf.as_slice()).unwrap());
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn build_json_body() {
         let mut req: Request = Request::new("google.com", "/").unwrap();
@@ -179,6 +182,6 @@ mod tests {
 
         req.build_json(body, &mut buf).unwrap();
 
-        println!("{}", String::from_utf8_lossy(buf.as_slice()));
+        println!("{}", from_utf8(buf.as_slice()).unwrap());
     }
 }

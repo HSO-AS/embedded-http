@@ -1,8 +1,7 @@
-
 #[cfg(feature = "alloc")]
 use crate::alloc::string::ToString;
 
-#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Debug)]
 pub enum Error {
     #[cfg(feature = "serde_json")]
     SerdeError(serde_json::Error),
@@ -17,7 +16,11 @@ impl defmt::Format for Error {
         match self {
             #[cfg(feature = "serde_json")]
             Error::SerdeError(e) => {
-                defmt::write!(fmt, "SerdeError({})", e);
+                #[cfg(not(feature = "alloc"))]
+                defmt::write!(fmt, "SerdeError()");
+
+                #[cfg(feature = "alloc")]
+                defmt::write!(fmt, "SerdeError({})", e.to_string());
             }
             Error::BufferTooSmall(s1, s2) => {
                 defmt::write!(fmt, "BufferTooSmall({}, {})", s1, s2);
