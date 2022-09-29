@@ -50,14 +50,14 @@ impl<'a> Response<'a> {
     /// Extract the body of the response
     /// returns None if no content length is found
     /// returns empty slice if content length is 0
-    pub fn body(&mut self) -> Option<&[u8]> {
+    pub fn body(&mut self) -> Option<&'a [u8]> {
         let content_length = self.content_length()?;
         Some(&self.inner[self.inner.len() - content_length..])
     }
 
     /// Extract the header of the response
     /// returns None if no content length is found or header is invalid utf8
-    pub fn header(&mut self) -> Option<&str> {
+    pub fn header(&mut self) -> Option<&'a str> {
         let content_length = self.content_length()?;
         from_utf8(&self.inner[..self.inner.len() - content_length]).ok()
     }
@@ -90,11 +90,17 @@ mod tests {
     #[test]
     fn deserialize_body() {
         let mut resp = Response::new(BODY_RESPONSE);
+        let header = resp.header().unwrap();
+        let body = resp.body().unwrap();
+
         assert_eq!(resp.status_code().unwrap(), 200);
 
         assert_eq!(resp.content_length().unwrap(), 132);
 
-        println!("header: {}", resp.header().unwrap());
-        println!("body: {}", from_utf8(resp.body().unwrap()).unwrap());
+
+        println!("header: {}", header);
+        println!("body: {}", from_utf8(body).unwrap());
+
+        println!("status_code: {}", resp.status_code().unwrap())
     }
 }
