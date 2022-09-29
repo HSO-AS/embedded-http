@@ -1,5 +1,29 @@
-use core::str::FromStr;
+use core::str::{FromStr, Utf8Error};
 use core::str::from_utf8;
+use core::num::ParseIntError;
+
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResponseError {
+    Utf8Error(Utf8Error),
+    ParseIntError(ParseIntError),
+    HeaderNotFound,
+    Error,
+}
+
+impl From<Utf8Error> for ResponseError {
+    fn from(e: Utf8Error) -> Self {
+        ResponseError::Utf8Error(e)
+    }
+}
+
+impl From<ParseIntError> for ResponseError {
+    fn from(e: ParseIntError) -> Self {
+        ResponseError::ParseIntError(e)
+    }
+}
+
+type Result<T> = core::result::Result<T, ResponseError>;
 
 pub struct Response<'a> {
     inner: &'a [u8],
@@ -20,20 +44,20 @@ impl<'a> Response<'a> {
     }
 
     /// Creates a response, and checks that the header_len + content_len = buffer.len()
-    pub fn new_checked(content: &'a [u8]) -> Option<Self> {
+    pub fn new_checked(content: &'a [u8]) -> Result<Self> {
         let mut resp = Self::new(content);
         if resp.header_len()? + resp.content_length()? == content.len() {
             resp.status_code()?;
-            Some(resp)
+            Ok(resp)
         } else {
-            None
+            Err(ResponseError::Error)
         }
     }
 
     /// Calculate header len
-    pub fn header_len(&mut self) -> Option<usize> {
+    pub fn header_len(&mut self) -> Result<usize> {
         if let Some(hl) = self.header_length {
-            return Some(hl);
+            return Ok(hl);
         }
         let mut num_bytes = 0;
         for line in self.inner.split(|v| v == &b'\n') {
@@ -43,59 +67,61 @@ impl<'a> Response<'a> {
             }
         }
         self.header_length = Some(num_bytes);
-        self.header_length
+        Ok(num_bytes)
     }
 
     /// Extract the status code from the response
     /// returns None if no status code is found
-    pub fn status_code(&mut self) -> Option<u16> {
+    pub fn status_code(&mut self) -> Result<u16> {
         if let Some(sc) = self.status_code {
-            return Some(sc);
+            return Ok(sc);
         }
         let mut it = self.inner.split(|v| v == &b'\n');
-        let line = it.next()?;
-        let line = from_utf8(line).ok()?;
-        let start_idx = line.find("HTTP/1.1 ")? + "HTTP/1.1 ".len();
-        self.status_code = u16::from_str(&line[start_idx..start_idx + 3]).ok();
-        self.status_code
+        let line = it.next().ok_or_else(|| ResponseError::Error)?;
+        let line = from_utf8(line)?;
+        let start_idx = line.find("HTTP/1.1 ").ok_or_else(|| ResponseError::HeaderNotFound)? + "HTTP/1.1 ".len();
+        let status_code = u16::from_str(&line[start_idx..start_idx + 3])?;
+        self.status_code = Some(status_code);
+        Ok(status_code)
     }
 
     /// Extract the content length from the response
     /// returns None if no content length is found
-    pub fn content_length(&mut self) -> Option<usize> {
+    pub fn content_length(&mut self) -> Result<usize> {
         if let Some(cl) = self.content_length {
-            return Some(cl);
+            return Ok(cl);
         }
         let it = self.inner.split(|v| v == &b'\n');
         for line in it {
-            let line = from_utf8(line).ok()?;
+            let line = from_utf8(line)?;
             if let Some(start_idx) = line.find("content-length: ") {
-                self.content_length = usize::from_str(&line[start_idx + "content-length: ".len()..line.len() - 1]).ok();
-                return self.content_length;
+                let cl = usize::from_str(&line[start_idx + "content-length: ".len()..line.len() - 1])?;
+                self.content_length = Some(cl);
+                return Ok(cl);
             }
         }
-        None
+        Err(ResponseError::HeaderNotFound)
     }
 
 
     /// Extract the body of the response
     /// returns None if no content length is found
     /// returns empty slice if content length is 0
-    pub fn body(&mut self) -> Option<&'a [u8]> {
-        Some(&self.inner[self.header_len()?..])
+    pub fn body(&mut self) -> Result<&'a [u8]> {
+        Ok(&self.inner[self.header_len()?..self.header_len()? + self.content_length()?])
     }
 
     /// Extract the body of the response and parses as str
     /// returns None if no content length is found
     /// returns empty slice if content length is 0
-    pub fn body_as_str(&mut self) -> Option<&'a str> {
-        from_utf8(self.body()?).ok()
+    pub fn body_as_str(&mut self) -> Result<&'a str> {
+        Ok(from_utf8(self.body()?)?)
     }
 
     /// Extract the header of the response
     /// returns None if no content length is found or header is invalid utf8
-    pub fn header(&mut self) -> Option<&'a str> {
-        from_utf8(&self.inner[..self.header_len()?]).ok()
+    pub fn header(&mut self) -> Result<&'a str> {
+        Ok(from_utf8(&self.inner[..self.header_len()?])?)
     }
 }
 
