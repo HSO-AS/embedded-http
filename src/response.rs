@@ -2,6 +2,8 @@ use core::str::{FromStr, Utf8Error};
 use core::str::from_utf8;
 use core::num::ParseIntError;
 
+#[cfg(feature = "alloc")]
+use alloc::string::ToString;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseError {
@@ -9,6 +11,34 @@ pub enum ResponseError {
     ParseIntError(ParseIntError),
     HeaderNotFound,
     Error,
+}
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for ResponseError {
+    fn format(&self, fmt: defmt::Formatter) {
+        match self {
+            ResponseError::Utf8Error(e) => {
+                #[cfg(not(feature = "alloc"))]
+                defmt::write!(fmt, "Utf8Error()");
+
+                #[cfg(feature = "alloc")]
+                defmt::write!(fmt, "Utf8Error({})", e.to_string());
+            }
+            ResponseError::ParseIntError(e) => {
+                #[cfg(not(feature = "alloc"))]
+                defmt::write!(fmt, "ParseIntError()");
+
+                #[cfg(feature = "alloc")]
+                defmt::write!(fmt, "ParseIntError({})", e.to_string());
+            }
+            ResponseError::HeaderNotFound => {
+                defmt::write!(fmt, "HeaderNotFound");
+            }
+            ResponseError::Error => {
+                defmt::write!(fmt, "Error");
+            }
+        }
+    }
 }
 
 impl From<Utf8Error> for ResponseError {
