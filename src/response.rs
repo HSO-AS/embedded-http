@@ -2,7 +2,7 @@ use core::str::{FromStr, Utf8Error};
 use core::str::from_utf8;
 use core::num::ParseIntError;
 
-#[cfg(feature = "alloc")]
+#[cfg(all(feature = "alloc", feature = "defmt"))]
 use alloc::string::ToString;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,8 +196,8 @@ mod tests {
     #[test]
     fn checked_deserialize_body() {
         let mut resp = Response::new(BODY_RESPONSE);
-        dbg!(resp.header_len());
-        dbg!(resp.content_length());
+        dbg!(resp.header_len().unwrap());
+        dbg!(resp.content_length().unwrap());
         dbg!(BODY_RESPONSE.len());
         let mut resp = Response::new_checked(BODY_RESPONSE).unwrap();
         let header = resp.header().unwrap();

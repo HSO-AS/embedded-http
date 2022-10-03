@@ -1,6 +1,6 @@
 [package]
 name = "embedded-http"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -12,9 +12,13 @@ serde_json = { version = "1", default-features = false, features = ['alloc'], op
 
 defmt = { version = "0.3", optional = true, features = ["alloc"] }
 
+embedded-io = { version = "0.3.0", default-features = false }
+
 [features]
 
-alloc = []
+alloc = ["embedded-io/alloc", "defmt?/alloc"]
+
+defmt = ["dep:defmt", "embedded-io/defmt"]
 
 [dev-dependencies]
 
