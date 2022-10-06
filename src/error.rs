@@ -1,11 +1,8 @@
-#[cfg(all(feature = "defmt", feature = "alloc"))]
-use defmt::warn;
-
 use embedded_io::blocking::WriteFmtError;
 use embedded_io::ErrorKind;
 
-#[cfg(all(feature = "alloc", feature = "serde_json"))]
-use crate::alloc::string::ToString;
+
+use crate::prelude::*;
 
 #[derive(Debug)]
 pub enum Error {

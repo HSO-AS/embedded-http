@@ -2,8 +2,7 @@ use core::str::{FromStr, Utf8Error};
 use core::str::from_utf8;
 use core::num::ParseIntError;
 
-#[cfg(all(feature = "alloc", feature = "defmt"))]
-use alloc::string::ToString;
+use crate::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseError {

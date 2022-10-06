@@ -1,8 +1,3 @@
-// #[cfg(feature = "alloc")]
-// use alloc::format;
-// #[cfg(feature = "alloc")]
-// use alloc::vec::Vec;
-
 use core::fmt::{Display, Formatter};
 
 
@@ -10,8 +5,7 @@ use core::write;
 use embedded_io::blocking::Write;
 use embedded_io::Error as IoError;
 
-#[cfg(feature = "serde_json")]
-use serde::Serialize;
+use crate::prelude::*;
 
 use crate::Error;
 
@@ -91,7 +85,7 @@ impl<'a, const D: usize> Request<'a, D> {
     //     self
     // }
 
-    fn build_header_no_body_inner<W: Write>(&self, mut buf:  W) -> Result<(), Error> {
+    fn build_header_no_body_inner<W: Write>(&self, mut buf: W) -> Result<(), Error> {
         write!(buf, "{} {} HTTP/1.1\r\n", self.method, self.path)?;
 
         for (key, value) in &self.headers[..self.header_len] {
