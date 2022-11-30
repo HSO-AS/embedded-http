@@ -9,6 +9,7 @@ pub enum ResponseError {
     Utf8Error(Utf8Error),
     ParseIntError(ParseIntError),
     HeaderNotFound,
+    Incomplete,
     Error,
 }
 
@@ -36,6 +37,8 @@ impl defmt::Format for ResponseError {
             ResponseError::Error => {
                 defmt::write!(fmt, "Error");
             }
+            ResponseError::Incomplete => {
+                defmt::write!(fmt, "Incomplete");}
         }
     }
 }
@@ -54,6 +57,7 @@ impl From<ParseIntError> for ResponseError {
 
 type Result<T> = core::result::Result<T, ResponseError>;
 
+#[derive(Eq, PartialEq, Debug)]
 pub struct Response<'a> {
     inner: &'a [u8],
 
@@ -74,12 +78,14 @@ impl<'a> Response<'a> {
 
     /// Creates a response, and checks that the header_len + content_len = buffer.len()
     pub fn new_checked(content: &'a [u8]) -> Result<Self> {
-        let mut resp = Self::new(content);
-        if resp.header_len()? + resp.content_length()? == content.len() {
-            resp.status_code()?;
-            Ok(resp)
+        Self::new(content).check()
+    }
+
+    pub fn check(mut self) -> Result<Self> {
+        if self.header_len()? + self.content_length()? == self.inner.len() {
+            Ok(self)
         } else {
-            Err(ResponseError::Error)
+            Err(ResponseError::Incomplete)
         }
     }
 
@@ -88,15 +94,21 @@ impl<'a> Response<'a> {
         if let Some(hl) = self.header_length {
             return Ok(hl);
         }
-        let mut num_bytes = 0;
-        for line in self.inner.split(|v| v == &b'\n') {
-            num_bytes += line.len() + 1;
-            if line == b"\r" {
-                break;
+        const MARKER: &str = "\r\n\r\n";
+
+        if self.inner.len() < MARKER.len() {
+            return Err(ResponseError::Incomplete)
+        }
+
+        for len in MARKER.len()..=self.inner.len() {
+            let slice = from_utf8(&self.inner[len - MARKER.len()..len])?;
+            if slice == MARKER {
+                self.header_length = Some(len);
+                return Ok(len);
             }
         }
-        self.header_length = Some(num_bytes);
-        Ok(num_bytes)
+
+        Err(ResponseError::Incomplete)
     }
 
     /// Extract the status code from the response
@@ -120,9 +132,13 @@ impl<'a> Response<'a> {
         if let Some(cl) = self.content_length {
             return Ok(cl);
         }
-        let it = self.inner.split(|v| v == &b'\n');
-        for line in it {
-            let line = from_utf8(line)?;
+
+        if self.status_code()? == 204 {
+            self.content_length = Some(0);
+            return Ok(0)
+        }
+
+        for line in self.header()?.split('\n') {
             if let Some(start_idx) = line.find("content-length: ") {
                 let cl = usize::from_str(&line[start_idx + "content-length: ".len()..line.len() - 1])?;
                 self.content_length = Some(cl);
@@ -162,6 +178,8 @@ mod tests {
     const SIMPLE_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\ndate: Wed, 28 Sep 2022 08:23:31 GMT\r\n\r\n";
     const BODY_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 132\r\nvary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers\r\ncontent-type: application/json\r\ndate: Wed, 28 Sep 2022 09:00:53 GMT\r\n\r\n{\"status_code\":200,\"canonical_reason\":\"OK\",\"data\":\"tap.it backend built with rustc version 1.63.0 at 2022-09-05\",\"description\":null}";
 
+    const NO_CONTENT: &[u8] = b"HTTP/1.1 204 No Content\r\nconnection: close\r\ndate: Wed, 30 Nov 2022 10:29:55 GMT\r\n\r\n";
+
     #[test]
     fn deserialize_simple() {
         let mut resp = Response::new(SIMPLE_RESPONSE);
@@ -190,6 +208,27 @@ mod tests {
         println!("body: {}", from_utf8(body).unwrap());
 
         println!("status_code: {}", resp.status_code().unwrap())
+    }
+
+
+    #[test]
+    fn test_no_content() {
+        let mut resp = Response::new(NO_CONTENT);
+        let header = resp.header().unwrap();
+        let body = resp.body().unwrap();
+
+        assert_eq!(resp.status_code().unwrap(), 204);
+
+        assert_eq!(resp.content_length().unwrap(), 0);
+
+        assert!(resp.check().is_ok());
+    }
+
+
+    #[test]
+    fn test_no_incomplete() {
+        let resp = Response::new(&NO_CONTENT[0..NO_CONTENT.len()-1]);
+        assert_eq!(resp.check(), Err(ResponseError::Incomplete));
     }
 
     #[test]

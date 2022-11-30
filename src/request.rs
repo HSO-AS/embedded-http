@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn build_simple() {
-        let mut req: Request = Request::new("google.com", "/").unwrap();
+        let mut req: Request = Request::new("api.aqsense.no", "/v1/health").unwrap();
         req.get();
 
         let mut buf = Vec::new();
