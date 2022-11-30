@@ -38,7 +38,8 @@ impl defmt::Format for ResponseError {
                 defmt::write!(fmt, "Error");
             }
             ResponseError::Incomplete => {
-                defmt::write!(fmt, "Incomplete");}
+                defmt::write!(fmt, "Incomplete");
+            }
         }
     }
 }
@@ -69,11 +70,14 @@ pub struct Response<'a> {
 
     /// used to lazy evaluate header_length
     header_length: Option<usize>,
+
+    /// used to lazy evaluate content_type
+    content_type: Option<Option<&'a str>>,
 }
 
 impl<'a> Response<'a> {
     pub fn new(content: &'a [u8]) -> Self {
-        Self { inner: content, status_code: None, content_length: None, header_length: None }
+        Self { inner: content, status_code: None, content_length: None, header_length: None, content_type: None }
     }
 
     /// Creates a response, and checks that the header_len + content_len = buffer.len()
@@ -97,7 +101,7 @@ impl<'a> Response<'a> {
         const MARKER: &str = "\r\n\r\n";
 
         if self.inner.len() < MARKER.len() {
-            return Err(ResponseError::Incomplete)
+            return Err(ResponseError::Incomplete);
         }
 
         for len in MARKER.len()..=self.inner.len() {
@@ -111,17 +115,43 @@ impl<'a> Response<'a> {
         Err(ResponseError::Incomplete)
     }
 
+    /// Find the first line which contains the marker in the header, and returns the remainding string
+    /// excluding the '\r' character
+    fn find_header_value<'b>(&mut self, marker: &'b str) -> Result<&'a str> {
+        for line in self.header()?.split('\n') {
+            if let Some(idx) = line.find(marker) {
+                return Ok(&line[idx + marker.len()..line.len() - 1]);
+            }
+        }
+
+        Err(ResponseError::HeaderNotFound)
+    }
+
+    /// Extract content type from header
+    pub fn content_type(&mut self) -> Result<Option<&str>> {
+        if let Some(sc) = self.content_type {
+            return Ok(sc);
+        }
+
+        let ct = match self.find_header_value("content-type: ") {
+            Ok(v) => Some(v),
+            Err(ResponseError::HeaderNotFound) => None,
+            Err(e) => return Err(e)
+        };
+
+        self.content_type = Some(ct);
+        Ok(ct)
+    }
+
     /// Extract the status code from the response
     /// returns None if no status code is found
     pub fn status_code(&mut self) -> Result<u16> {
         if let Some(sc) = self.status_code {
             return Ok(sc);
         }
-        let mut it = self.inner.split(|v| v == &b'\n');
-        let line = it.next().ok_or_else(|| ResponseError::Error)?;
-        let line = from_utf8(line)?;
-        let start_idx = line.find("HTTP/1.1 ").ok_or_else(|| ResponseError::HeaderNotFound)? + "HTTP/1.1 ".len();
-        let status_code = u16::from_str(&line[start_idx..start_idx + 3])?;
+
+        let sc = self.find_header_value("HTTP/1.1 ")?;
+        let status_code = u16::from_str(&sc[..3])?;
         self.status_code = Some(status_code);
         Ok(status_code)
     }
@@ -135,17 +165,13 @@ impl<'a> Response<'a> {
 
         if self.status_code()? == 204 {
             self.content_length = Some(0);
-            return Ok(0)
+            return Ok(0);
         }
 
-        for line in self.header()?.split('\n') {
-            if let Some(start_idx) = line.find("content-length: ") {
-                let cl = usize::from_str(&line[start_idx + "content-length: ".len()..line.len() - 1])?;
-                self.content_length = Some(cl);
-                return Ok(cl);
-            }
-        }
-        Err(ResponseError::HeaderNotFound)
+        let cl = self.find_header_value("content-length: ")?;
+        let cl = usize::from_str(cl)?;
+        self.content_length = Some(cl);
+        Ok(cl)
     }
 
 
@@ -190,6 +216,8 @@ mod tests {
         println!("header: {}", resp.header().unwrap());
         println!("body: {}", from_utf8(resp.body().unwrap()).unwrap());
 
+        assert_eq!(resp.content_type().unwrap(), None);
+
         assert_eq!(resp.body().unwrap().len(), 0);
     }
 
@@ -203,6 +231,7 @@ mod tests {
 
         assert_eq!(resp.content_length().unwrap(), 132);
 
+        assert_eq!(resp.content_type().unwrap(), Some("application/json"));
 
         println!("header: {}", header);
         println!("body: {}", from_utf8(body).unwrap());
@@ -221,13 +250,15 @@ mod tests {
 
         assert_eq!(resp.content_length().unwrap(), 0);
 
+        assert_eq!(resp.content_type().unwrap(), None);
+
         assert!(resp.check().is_ok());
     }
 
 
     #[test]
     fn test_no_incomplete() {
-        let resp = Response::new(&NO_CONTENT[0..NO_CONTENT.len()-1]);
+        let resp = Response::new(&NO_CONTENT[0..NO_CONTENT.len() - 1]);
         assert_eq!(resp.check(), Err(ResponseError::Incomplete));
     }
 
@@ -244,6 +275,8 @@ mod tests {
         assert_eq!(resp.status_code().unwrap(), 200);
 
         assert_eq!(resp.content_length().unwrap(), 132);
+
+        assert_eq!(resp.content_type().unwrap(), Some("application/json"));
 
 
         println!("header: {}", header);

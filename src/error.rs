@@ -44,9 +44,9 @@ impl defmt::Format for Error {
 }
 
 impl From<core::fmt::Error> for Error {
-    fn from(e: core::fmt::Error) -> Self {
+    fn from(_e: core::fmt::Error) -> Self {
         #[cfg(all(feature = "defmt", feature = "alloc"))]
-        warn!("FmtError({})", e.to_string());
+        warn!("FmtError({})", _e.to_string());
 
         Self::FmtError
     }
