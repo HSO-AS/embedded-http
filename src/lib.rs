@@ -1,5 +1,7 @@
 #![no_std]
 
+#![cfg_attr(feature = "unstable", feature(error_in_core))]
+
 #[cfg(any(test))]
 #[macro_use]
 extern crate std;

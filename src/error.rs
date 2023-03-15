@@ -1,7 +1,6 @@
 use embedded_io::blocking::WriteFmtError;
 use embedded_io::ErrorKind;
 
-
 use crate::prelude::*;
 
 #[derive(Debug)]
@@ -11,7 +10,7 @@ pub enum Error {
     BufferTooSmall(usize, usize),
     FmtError,
     Other(&'static str),
-    IoError(embedded_io::ErrorKind),
+    IoError(ErrorKind),
 }
 
 #[cfg(feature = "defmt")]
@@ -65,7 +64,6 @@ impl From<Error> for core::fmt::Error {
     }
 }
 
-
 impl From<&dyn embedded_io::Error> for Error {
     fn from(e: &dyn embedded_io::Error) -> Self {
         Self::from(e.kind())
@@ -75,17 +73,35 @@ impl From<&dyn embedded_io::Error> for Error {
 impl<E> From<WriteFmtError<E>> for Error {
     fn from(e: WriteFmtError<E>) -> Self {
         match e {
-            WriteFmtError::FmtError => { Error::FmtError }
-            WriteFmtError::Other(_) => {
-                Error::IoError(ErrorKind::Other)
-            }
+            WriteFmtError::FmtError => Error::FmtError,
+            WriteFmtError::Other(_) => Error::IoError(ErrorKind::Other),
         }
     }
 }
 
-
 impl From<ErrorKind> for Error {
     fn from(ek: ErrorKind) -> Self {
         Self::IoError(ek)
+    }
+}
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[cfg(feature = "unstable")]
+mod unstable {
+    use super::*;
+
+    impl core::error::Error for Error {
+        fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+            match self {
+                #[cfg(feature = "serde_json")]
+                Error::SerdeError(e) => Some(e),
+                _ => None,
+            }
+        }
     }
 }
