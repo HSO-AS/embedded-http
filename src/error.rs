@@ -95,13 +95,5 @@ impl core::fmt::Display for Error {
 mod unstable {
     use super::*;
 
-    impl core::error::Error for Error {
-        fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-            match self {
-                #[cfg(feature = "serde_json")]
-                Error::SerdeError(e) => Some(e),
-                _ => None,
-            }
-        }
-    }
+    impl core::error::Error for Error {}
 }
