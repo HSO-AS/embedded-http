@@ -44,6 +44,12 @@ impl defmt::Format for ResponseError {
     }
 }
 
+impl core::fmt::Display for ResponseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 impl From<Utf8Error> for ResponseError {
     fn from(e: Utf8Error) -> Self {
         ResponseError::Utf8Error(e)
@@ -193,6 +199,21 @@ impl<'a> Response<'a> {
     /// returns None if no content length is found or header is invalid utf8
     pub fn header(&mut self) -> Result<&'a str> {
         Ok(from_utf8(&self.inner[..self.header_len()?])?)
+    }
+}
+
+#[cfg(feature = "unstable")]
+mod unstable {
+    use super::*;
+
+    impl core::error::Error for ResponseError {
+        fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+            match self {
+                ResponseError::Utf8Error(e) => Some(e),
+                ResponseError::ParseIntError(e) => Some(e),
+                _ => None
+            }
+        }
     }
 }
 
