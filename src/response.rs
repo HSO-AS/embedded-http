@@ -3,6 +3,9 @@ use core::num::ParseIntError;
 use core::str::from_utf8;
 use core::str::{FromStr, Utf8Error};
 
+#[allow(unused_imports)]
+use crate::prelude::*;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseError {
     Utf8Error(Utf8Error),
@@ -16,6 +19,7 @@ pub enum ResponseError {
 #[cfg(feature = "defmt")]
 impl defmt::Format for ResponseError {
     fn format(&self, fmt: defmt::Formatter) {
+        #[allow(unused_variables)]
         match self {
             ResponseError::Utf8Error(e) => {
                 #[cfg(not(feature = "alloc"))]
@@ -41,6 +45,10 @@ impl defmt::Format for ResponseError {
                 defmt::write!(fmt, "Incomplete");
             }
             ResponseError::ParseError(e) => {
+                #[cfg(not(feature = "alloc"))]
+                defmt::write!(fmt, "ParseError()");
+
+                #[cfg(feature = "alloc")]
                 defmt::write!(fmt, "ParseError({})", e.to_string());
             }
         }
@@ -257,7 +265,7 @@ mod tests {
             chrono::NaiveDate::from_ymd_opt(2022, 9, 28).unwrap(),
             chrono::NaiveTime::from_hms_opt(8, 23, 31).unwrap(),
         )
-        .and_utc();
+            .and_utc();
 
         let date = resp.date().unwrap();
         assert_eq!(date, expected_date);

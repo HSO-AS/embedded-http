@@ -1,6 +1,9 @@
 use embedded_io::blocking::WriteFmtError;
 use embedded_io::ErrorKind;
 
+#[allow(unused_imports)]
+use crate::prelude::*;
+
 #[derive(Debug)]
 pub enum Error {
     #[cfg(feature = "serde_json")]

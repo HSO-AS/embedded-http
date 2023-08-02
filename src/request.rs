@@ -6,6 +6,9 @@ use embedded_io::Error as IoError;
 
 use crate::Error;
 
+#[allow(unused_imports)]
+use crate::prelude::*;
+
 pub enum Method {
     Get,
     Put,
