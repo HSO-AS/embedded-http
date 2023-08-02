@@ -1,11 +1,8 @@
 use core::fmt::{Display, Formatter};
 
-
 use core::write;
 use embedded_io::blocking::Write;
 use embedded_io::Error as IoError;
-
-use crate::prelude::*;
 
 use crate::Error;
 
@@ -60,7 +57,6 @@ impl<'a, const D: usize> Request<'a, D> {
         self
     }
 
-
     pub fn put(&mut self) -> &mut Self {
         self.method = Method::Put;
         self
@@ -105,7 +101,6 @@ impl<'a, const D: usize> Request<'a, D> {
     }
 }
 
-
 impl<'a, const D: usize> Request<'a, D> {
     pub fn build<W: Write>(self, body: &'_ [u8], mut buf: W) -> Result<(), Error> {
         self.build_header_no_body_inner(&mut buf)?;
@@ -117,7 +112,6 @@ impl<'a, const D: usize> Request<'a, D> {
     }
 }
 
-
 #[cfg(all(feature = "serde_json", feature = "alloc"))]
 impl<'a, const D: usize> Request<'a, D> {
     pub fn build_json<W: Write, T: Serialize>(mut self, body: T, buf: W) -> Result<(), Error> {
@@ -128,15 +122,13 @@ impl<'a, const D: usize> Request<'a, D> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(feature = "alloc")]
-    use alloc::{vec::Vec};
+    use alloc::vec::Vec;
 
     use core::str::from_utf8;
-
 
     #[test]
     fn build_simple() {
@@ -162,7 +154,6 @@ mod tests {
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
     }
-
 
     #[test]
     fn build_simple_body_no_alloc() {

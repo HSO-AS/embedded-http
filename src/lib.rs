@@ -1,8 +1,7 @@
 #![no_std]
-
 #![cfg_attr(feature = "unstable", feature(error_in_core))]
 
-#[cfg(any(test))]
+#[cfg(test)]
 #[macro_use]
 extern crate std;
 
@@ -14,14 +13,14 @@ mod prelude {
     pub use crate::alloc::string::ToString;
 
     #[cfg(feature = "defmt")]
-    pub use defmt::{info, debug, warn, error};
+    pub use defmt::{debug, error, info, warn};
 
     #[cfg(feature = "serde_json")]
     pub use serde::Serialize;
 }
 
-pub mod request;
 pub mod error;
+pub mod request;
 pub mod response;
 
 pub use error::Error;

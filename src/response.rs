@@ -1,8 +1,7 @@
-use core::str::{FromStr, Utf8Error};
-use core::str::from_utf8;
+use chrono::{DateTime, Utc};
 use core::num::ParseIntError;
-
-use crate::prelude::*;
+use core::str::from_utf8;
+use core::str::{FromStr, Utf8Error};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseError {
@@ -11,6 +10,7 @@ pub enum ResponseError {
     HeaderNotFound,
     Incomplete,
     Error,
+    ParseError(chrono::ParseError),
 }
 
 #[cfg(feature = "defmt")]
@@ -40,6 +40,9 @@ impl defmt::Format for ResponseError {
             ResponseError::Incomplete => {
                 defmt::write!(fmt, "Incomplete");
             }
+            ResponseError::ParseError(e) => {
+                defmt::write!(fmt, "ParseError({})", e.to_string());
+            }
         }
     }
 }
@@ -59,6 +62,12 @@ impl From<Utf8Error> for ResponseError {
 impl From<ParseIntError> for ResponseError {
     fn from(e: ParseIntError) -> Self {
         ResponseError::ParseIntError(e)
+    }
+}
+
+impl From<chrono::ParseError> for ResponseError {
+    fn from(e: chrono::ParseError) -> Self {
+        ResponseError::ParseError(e)
     }
 }
 
@@ -83,7 +92,13 @@ pub struct Response<'a> {
 
 impl<'a> Response<'a> {
     pub fn new(content: &'a [u8]) -> Self {
-        Self { inner: content, status_code: None, content_length: None, header_length: None, content_type: None }
+        Self {
+            inner: content,
+            status_code: None,
+            content_length: None,
+            header_length: None,
+            content_type: None,
+        }
     }
 
     /// Creates a response, and checks that the header_len + content_len = buffer.len()
@@ -142,7 +157,7 @@ impl<'a> Response<'a> {
         let ct = match self.find_header_value("content-type: ") {
             Ok(v) => Some(v),
             Err(ResponseError::HeaderNotFound) => None,
-            Err(e) => return Err(e)
+            Err(e) => return Err(e),
         };
 
         self.content_type = Some(ct);
@@ -180,6 +195,13 @@ impl<'a> Response<'a> {
         Ok(cl)
     }
 
+    /// Extracts the date from the header and parses it as DateTime<Utc>
+    pub fn date(&mut self) -> Result<DateTime<Utc>> {
+        Ok(
+            chrono::DateTime::parse_from_rfc2822(self.find_header_value("date: ")?)?
+                .with_timezone(&Utc),
+        )
+    }
 
     /// Extract the body of the response
     /// returns None if no content length is found
@@ -211,21 +233,35 @@ mod unstable {
             match self {
                 ResponseError::Utf8Error(e) => Some(e),
                 ResponseError::ParseIntError(e) => Some(e),
-                _ => None
+                _ => None,
             }
         }
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::NaiveDateTime;
 
     const SIMPLE_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\ndate: Wed, 28 Sep 2022 08:23:31 GMT\r\n\r\n";
     const BODY_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 132\r\nvary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers\r\ncontent-type: application/json\r\ndate: Wed, 28 Sep 2022 09:00:53 GMT\r\n\r\n{\"status_code\":200,\"canonical_reason\":\"OK\",\"data\":\"tap.it backend built with rustc version 1.63.0 at 2022-09-05\",\"description\":null}";
 
     const NO_CONTENT: &[u8] = b"HTTP/1.1 204 No Content\r\nconnection: close\r\ndate: Wed, 30 Nov 2022 10:29:55 GMT\r\n\r\n";
+
+    #[test]
+    fn deserialize_date() {
+        let mut resp = Response::new(SIMPLE_RESPONSE);
+
+        let expected_date = NaiveDateTime::new(
+            chrono::NaiveDate::from_ymd_opt(2022, 9, 28).unwrap(),
+            chrono::NaiveTime::from_hms_opt(8, 23, 31).unwrap(),
+        )
+        .and_utc();
+
+        let date = resp.date().unwrap();
+        assert_eq!(date, expected_date);
+    }
 
     #[test]
     fn deserialize_simple() {
@@ -260,12 +296,11 @@ mod tests {
         println!("status_code: {}", resp.status_code().unwrap())
     }
 
-
     #[test]
     fn test_no_content() {
         let mut resp = Response::new(NO_CONTENT);
-        let header = resp.header().unwrap();
-        let body = resp.body().unwrap();
+        let _header = resp.header().unwrap();
+        let _body = resp.body().unwrap();
 
         assert_eq!(resp.status_code().unwrap(), 204);
 
@@ -275,7 +310,6 @@ mod tests {
 
         assert!(resp.check().is_ok());
     }
-
 
     #[test]
     fn test_no_incomplete() {
@@ -298,7 +332,6 @@ mod tests {
         assert_eq!(resp.content_length().unwrap(), 132);
 
         assert_eq!(resp.content_type().unwrap(), Some("application/json"));
-
 
         println!("header: {}", header);
         println!("body: {}", from_utf8(body).unwrap());
