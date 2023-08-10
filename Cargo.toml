@@ -39,3 +39,5 @@ embedded-http = { path = ".", features = ["alloc"] }
 serde_derive = "1.0.176"
 
 httparse = "1.8.0"
+
+httptest = "0.15.4"

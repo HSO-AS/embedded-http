@@ -73,14 +73,6 @@ impl<T> RequestWrapper<T> {
     }
 }
 
-impl RequestWrapper<()> {
-    pub fn to_request<W: Write>(&self, w: W) -> Result<()> {
-        self.write_header(w, &[])?;
-
-        Ok(())
-    }
-}
-
 #[cfg(feature = "serde_json")]
 impl<T: Serialize> RequestWrapper<T> {
     pub fn write_json_to<W: Write>(&self, mut w: W) -> Result<()> {
@@ -95,6 +87,12 @@ impl<T: Serialize> RequestWrapper<T> {
 
 
         Ok(())
+    }
+
+    pub fn to_json_vec(&self) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        self.write_json_to(&mut buf)?;
+        Ok(buf)
     }
 }
 
@@ -134,6 +132,12 @@ impl<T: ToRequestBody> RequestWrapper<T> {
         }
 
         Ok(())
+    }
+
+    pub fn to_vec(&self) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        self.write_to(&mut buf)?;
+        Ok(buf)
     }
 }
 
@@ -304,7 +308,7 @@ mod tests {
 
         let mut buf = Vec::new();
 
-        req.to_request(&mut buf).unwrap();
+        req.write_to(&mut buf).unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
 
