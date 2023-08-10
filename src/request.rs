@@ -1,45 +1,206 @@
-use core::fmt::{Display, Formatter};
-
 use core::write;
-use embedded_io::blocking::Write;
-use embedded_io::Error as IoError;
+use embedded_io::Write;
 
-use crate::Error;
+use alloc::vec::Vec;
+
+use crate::{Error, Result};
 
 #[allow(unused_imports)]
 use crate::prelude::*;
 
-pub enum Method {
-    Get,
-    Put,
-    Post,
+use http::{HeaderName, HeaderValue, Request};
+use http::uri::PathAndQuery;
+
+const USER_AGENT: HeaderValue = HeaderValue::from_static(":)");
+
+
+pub struct RequestWrapper<T> {
+    pub inner: Request<T>,
 }
 
-impl Display for Method {
-    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Method::Get => {
-                write!(f, "GET")
-            }
-            Method::Put => {
-                write!(f, "PUT")
-            }
-            Method::Post => {
-                write!(f, "POST")
-            }
-        }
+impl<T> From<Request<T>> for RequestWrapper<T> {
+    fn from(inner: Request<T>) -> Self {
+        Self { inner }
     }
 }
 
-pub struct Request<'a, const D: usize = 8> {
-    pub method: Method,
-    pub path: &'a str,
-    pub headers: [(&'a str, &'a str); D],
-    header_len: usize,
-    // pub body: Option<&'a T>,
+
+impl<T> RequestWrapper<T> {
+    pub fn new(request: Request<T>) -> Self {
+        Self {
+            inner: request,
+        }
+    }
+
+    fn write_header<W: Write>(&self, mut w: W, extra_headers: &[(&HeaderName, &HeaderValue)]) -> Result<(), Error> {
+        fn write_header_value<W: Write>(name: &HeaderName, value: &HeaderValue, w: &mut W) -> Result<()> {
+            write!(w, "{}: ", name)?;
+            w.write_all(value.as_bytes())?;
+            write!(w, "\r\n")?;
+            Ok(())
+        }
+
+        write!(w, "{} {} HTTP/1.1\r\n", self.inner.method(), self.inner.uri().path_and_query()
+            .unwrap_or(&PathAndQuery::from_static("/")))?;
+
+        // write host field
+        write_header_value(
+            &http::header::HOST,
+            &HeaderValue::from_str(self.inner.uri().host().unwrap_or("")).unwrap(),
+            &mut w)?;
+
+        // write user agent field
+        write_header_value(
+            &http::header::USER_AGENT,
+            &USER_AGENT,
+            &mut w)?;
+
+        for (name, value) in
+        self.inner.headers().iter()
+            .filter(|(key, _)| key.ne(&http::header::USER_AGENT))
+            .filter(|(key, _)| key.ne(&http::header::HOST))
+        {
+            write_header_value(name, value, &mut w)?;
+        }
+
+        for (name, value) in extra_headers {
+            write_header_value(name, value, &mut w)?;
+        }
+
+        write!(w, "\r\n")?;
+
+        Ok(())
+    }
 }
 
-impl<'a, const D: usize> Request<'a, D> {
+impl RequestWrapper<()> {
+    pub fn to_request<W: Write>(&self, w: W) -> Result<()> {
+        self.write_header(w, &[])?;
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "serde_json")]
+impl<T: Serialize> RequestWrapper<T> {
+    pub fn write_json_to<W: Write>(&self, mut w: W) -> Result<()> {
+        let body = serde_json::to_string(&self.inner.body())?;
+
+        self.write_header(&mut w, &[
+            (&http::header::CONTENT_TYPE, &HeaderValue::from_static(mime::APPLICATION_JSON.as_ref())),
+            (&http::header::CONTENT_LENGTH, &HeaderValue::from(body.len())),
+        ])?;
+
+        w.write_all(body.as_bytes())?;
+
+
+        Ok(())
+    }
+}
+
+
+impl<T: ToRequestBody> RequestWrapper<T> {
+    pub fn write_to<W: Write>(&self, mut w: W) -> Result<()> {
+        // If there is no content type, we can just write the header and be done
+        let ct = if let Some(ct) = self.inner.body().content_type() {
+            ct
+        } else {
+            self.write_header(&mut w, &[])?;
+            return Ok(());
+        };
+
+        let mut body = None;
+
+        // If the content length is known, we can write the body directly to the writer
+        let cl = if let Some(cl) = self.inner.body().content_length() {
+            cl
+        } else {
+            let mut body_inner = Vec::new();
+            self.inner.body().write_body(&mut body_inner)?;
+            let cl = HeaderValue::from(body_inner.len());
+            body = Some(body_inner);
+            cl
+        };
+
+        self.write_header(&mut w, &[
+            (&http::header::CONTENT_TYPE, &ct),
+            (&http::header::CONTENT_LENGTH, &cl),
+        ])?;
+
+        if let Some(b) = body {
+            w.write_all(&b)?;
+        } else {
+            self.inner.body().write_body(&mut w)?;
+        }
+
+        Ok(())
+    }
+}
+
+pub trait ToRequestBody {
+    fn write_body<W: Write>(&self, w: W) -> Result<()>;
+
+    fn content_type(&self) -> Option<HeaderValue>;
+
+    fn content_length(&self) -> Option<HeaderValue> {
+        None
+    }
+}
+
+impl<B: ToRequestBody> ToRequestBody for &B {
+    fn write_body<W: Write>(&self, w: W) -> Result<()> {
+        (*self).write_body(w)
+    }
+
+    fn content_type(&self) -> Option<HeaderValue> {
+        (*self).content_type()
+    }
+
+    fn content_length(&self) -> Option<HeaderValue> {
+        (*self).content_length()
+    }
+}
+
+impl ToRequestBody for () {
+    fn write_body<W: Write>(&self, _w: W) -> Result<()> {
+        Ok(())
+    }
+
+    fn content_type(&self) -> Option<HeaderValue> {
+        None
+    }
+}
+
+impl<'a> ToRequestBody for &'a str {
+    fn write_body<W: Write>(&self, mut w: W) -> Result<()> {
+        Ok(w.write_all(self.as_bytes())?)
+    }
+
+    fn content_type(&self) -> Option<HeaderValue> {
+        Some(HeaderValue::from_static(mime::TEXT_PLAIN_UTF_8.as_ref()))
+    }
+
+    fn content_length(&self) -> Option<HeaderValue> {
+        Some(HeaderValue::from(self.len()))
+    }
+}
+
+impl<'a> ToRequestBody for &'a [u8] {
+    fn write_body<W: Write>(&self, mut w: W) -> Result<()> {
+        Ok(w.write_all(self)?)
+    }
+
+    fn content_type(&self) -> Option<HeaderValue> {
+        Some(HeaderValue::from_static(mime::APPLICATION_OCTET_STREAM.as_ref()))
+    }
+
+    fn content_length(&self) -> Option<HeaderValue> {
+        Some(HeaderValue::from(self.len()))
+    }
+}
+
+/*
+impl<T> Request<'a, D> {
     pub fn new(host: &'a str, path: &'a str) -> Result<Self, Error> {
         let mut req = Self {
             method: Method::Get,
@@ -91,7 +252,7 @@ impl<'a, const D: usize> Request<'a, D> {
             write!(buf, "{}: {}\r\n", key, value)?;
         }
 
-        write!(buf, "User-Agent: rust\r\n")?;
+        write!(buf, "User-Agent: {USER_AGENT}\r\n")?;
 
         Ok(())
     }
@@ -115,6 +276,8 @@ impl<'a, const D: usize> Request<'a, D> {
     }
 }
 
+
+
 #[cfg(all(feature = "serde_json", feature = "alloc"))]
 impl<'a, const D: usize> Request<'a, D> {
     pub fn build_json<W: Write, T: Serialize>(mut self, body: T, buf: W) -> Result<(), Error> {
@@ -124,6 +287,7 @@ impl<'a, const D: usize> Request<'a, D> {
         self.build(body_ser.as_bytes(), buf)
     }
 }
+ */
 
 #[cfg(test)]
 mod tests {
@@ -134,57 +298,244 @@ mod tests {
     use core::str::from_utf8;
 
     #[test]
-    fn build_simple() {
-        let mut req: Request = Request::new("api.aqsense.no", "/v1/health").unwrap();
-        req.get();
+    fn build_no_body() {
+        let request = Request::get("https://api.aqsense.no/v1/health").body(()).unwrap();
+        let req = RequestWrapper::from(request);
 
         let mut buf = Vec::new();
 
-        req.build_header_no_body(&mut buf).unwrap();
+        req.to_request(&mut buf).unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
+
+
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut req = httparse::Request::new(&mut headers);
+
+        let body_status = req.parse(buf.as_slice()).unwrap();
+
+        // Check path, method and version
+        assert_eq!(req.path.unwrap(), "/v1/health");
+        assert_eq!(req.method.unwrap(), "GET");
+        assert_eq!(req.version.unwrap(), 1);
+
+        // check content type
+        assert!(!req.headers.iter().any(|header| header.name == http::header::CONTENT_TYPE));
+
+        // check validity of request
+        assert!(body_status.is_complete());
+
+        // check body
+        assert_eq!(buf[body_status.unwrap()..].len(), 0);
     }
 
     #[test]
-    fn build_simple_body() {
-        let mut req: Request = Request::new("google.com", "/").unwrap();
+    fn build_str_body() {
         let body = "hei";
-        req.post();
+        let req = Request::post("https://google.com/").body(body).unwrap();
+        let req = RequestWrapper::from(req);
 
         let mut buf = Vec::new();
+        req.write_to(&mut buf).unwrap();
 
-        req.build(body.as_bytes(), &mut buf).unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
+
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut req = httparse::Request::new(&mut headers);
+
+        let body_status = req.parse(buf.as_slice()).unwrap();
+
+        // Check path, method and version
+        assert_eq!(req.path.unwrap(), "/");
+        assert_eq!(req.method.unwrap(), "POST");
+        assert_eq!(req.version.unwrap(), 1);
+
+        // check content type
+        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        assert_eq!(from_utf8(ct.value).unwrap(), mime::TEXT_PLAIN_UTF_8.as_ref());
+
+        // check validity of request
+        assert!(body_status.is_complete());
+
+        // check body
+        assert_eq!(&buf[body_status.unwrap()..], body.as_bytes());
     }
 
     #[test]
-    fn build_simple_body_no_alloc() {
-        let mut req: Request = Request::new("google.com", "/").unwrap();
-        let body = "hei";
-        req.post();
+    fn build_byte_body() {
+        let body = b"hei";
+        let req = Request::post("https://google.com/").body(body.as_slice()).unwrap();
+        let req = RequestWrapper::from(req);
 
-        let mut buf = [0; 512];
+        let mut buf = Vec::new();
+        req.write_to(&mut buf).unwrap();
 
-        req.build(body.as_bytes(), buf.as_mut()).unwrap();
 
-        // Find the first 0 to find end of string
-        let len = buf.iter().enumerate().find(|v| v.1 == &0).unwrap().0;
+        println!("{}", from_utf8(buf.as_slice()).unwrap());
 
-        println!("{}", from_utf8(&buf[0..len]).unwrap());
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut req = httparse::Request::new(&mut headers);
+
+        let body_status = req.parse(buf.as_slice()).unwrap();
+
+        // Check path, method and version
+        assert_eq!(req.path.unwrap(), "/");
+        assert_eq!(req.method.unwrap(), "POST");
+        assert_eq!(req.version.unwrap(), 1);
+
+        // check content type
+        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        assert_eq!(from_utf8(ct.value).unwrap(), mime::APPLICATION_OCTET_STREAM.as_ref());
+
+        // check validity of request
+        assert!(body_status.is_complete());
+
+        // check body
+        assert_eq!(&buf[body_status.unwrap()..], body);
     }
 
-    #[cfg(all(feature = "serde_json", feature = "alloc"))]
+    #[cfg(feature = "serde_json")]
     #[test]
     fn build_json_body() {
-        let mut req: Request = Request::new("google.com", "/").unwrap();
-        let body = serde_json::json!({"hei": "hade"});
-        req.post();
+        let body = "hei";
+        let req = Request::post("https://google.com/").body(body).unwrap();
+        let req = RequestWrapper::from(req);
 
         let mut buf = Vec::new();
+        req.write_json_to(&mut buf).unwrap();
 
-        req.build_json(body, &mut buf).unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
+
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut req = httparse::Request::new(&mut headers);
+
+        let body_status = req.parse(buf.as_slice()).unwrap();
+
+        // Check path, method and version
+        assert_eq!(req.path.unwrap(), "/");
+        assert_eq!(req.method.unwrap(), "POST");
+        assert_eq!(req.version.unwrap(), 1);
+
+        // check content type
+        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        assert_eq!(from_utf8(ct.value).unwrap(), mime::APPLICATION_JSON.as_ref());
+
+        // check validity of request
+        assert!(body_status.is_complete());
+
+        // check body
+        let recv_body: serde_json::Value = serde_json::from_slice(&buf[body_status.unwrap()..]).unwrap();
+        assert_eq!(recv_body, body);
+    }
+
+    #[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
+    #[cfg_attr(feature = "serde_json", derive(serde_derive::Serialize, serde_derive::Deserialize))]
+    #[repr(packed)]
+    struct TestStruct {
+        a: u32,
+        b: u32,
+    }
+
+    impl AsRef<[u8]> for TestStruct {
+        fn as_ref(&self) -> &[u8] {
+            unsafe { std::slice::from_raw_parts(self as *const _ as *const u8, std::mem::size_of::<Self>()) }
+        }
+    }
+
+    impl AsMut<[u8]> for TestStruct {
+        fn as_mut(&mut self) -> &mut [u8] {
+            unsafe { std::slice::from_raw_parts_mut(self as *mut _ as *mut u8, std::mem::size_of::<Self>()) }
+        }
+    }
+
+    impl ToRequestBody for TestStruct {
+        fn write_body<W: Write>(&self, mut w: W) -> Result<()> {
+            Ok(w.write_all(self.as_ref())?)
+        }
+
+        fn content_type(&self) -> Option<HeaderValue> {
+            Some(HeaderValue::from_static("application/test"))
+        }
+
+        fn content_length(&self) -> Option<HeaderValue> {
+            Some(HeaderValue::from_static("8"))
+        }
+    }
+
+    #[test]
+    fn build_custom() {
+        let body = TestStruct { a: 1, b: 2 };
+        let req = http::Request::post("https://google.com/").body(&body).unwrap();
+        let req = RequestWrapper::from(req);
+
+        let mut buf = Vec::new();
+        req.write_to(&mut buf).unwrap();
+
+
+        println!("{}", from_utf8(buf.as_slice()).unwrap());
+
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut req = httparse::Request::new(&mut headers);
+
+        let body_status = req.parse(buf.as_slice()).unwrap();
+
+        // Check path, method and version
+        assert_eq!(req.path.unwrap(), "/");
+        assert_eq!(req.method.unwrap(), "POST");
+        assert_eq!(req.version.unwrap(), 1);
+
+        // check content type
+        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        assert_eq!(from_utf8(ct.value).unwrap(), "application/test");
+
+        // check validity of request
+        assert!(body_status.is_complete());
+
+        // check body
+        let mut new_body = TestStruct::default();
+
+        assert_eq!(&buf[body_status.unwrap()..], body.as_ref());
+
+        new_body.as_mut().copy_from_slice(&buf[body_status.unwrap()..]);
+        assert_eq!(new_body, body);
+    }
+
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn build_custom_json() {
+        let body = TestStruct { a: 1, b: 2 };
+        let req = http::Request::post("https://google.com/").body(&body).unwrap();
+        let req = RequestWrapper::from(req);
+
+        let mut buf = Vec::new();
+        req.write_json_to(&mut buf).unwrap();
+
+
+        println!("{}", from_utf8(buf.as_slice()).unwrap());
+
+        let mut headers = [httparse::EMPTY_HEADER; 16];
+        let mut req = httparse::Request::new(&mut headers);
+
+        let body_status = req.parse(buf.as_slice()).unwrap();
+
+        // Check path, method and version
+        assert_eq!(req.path.unwrap(), "/");
+        assert_eq!(req.method.unwrap(), "POST");
+        assert_eq!(req.version.unwrap(), 1);
+
+        // check content type
+        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        assert_eq!(from_utf8(ct.value).unwrap(), mime::APPLICATION_JSON.as_ref());
+
+        // check validity of request
+        assert!(body_status.is_complete());
+
+        // check body
+        let new_body: TestStruct = serde_json::from_slice(&buf[body_status.unwrap()..]).unwrap();
+
+        assert_eq!(new_body, body);
     }
 }

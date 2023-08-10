@@ -5,11 +5,9 @@
 #[macro_use]
 extern crate std;
 
-#[cfg(feature = "alloc")]
 extern crate alloc;
 
 mod prelude {
-    #[cfg(feature = "alloc")]
     pub use crate::alloc::string::ToString;
 
     #[cfg(feature = "defmt")]
@@ -24,3 +22,5 @@ pub mod request;
 pub mod response;
 
 pub use error::Error;
+
+pub type Result<T, E = Error> = core::result::Result<T, E>;

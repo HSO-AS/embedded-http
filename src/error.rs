@@ -1,23 +1,30 @@
-use embedded_io::blocking::WriteFmtError;
-use embedded_io::ErrorKind;
+use embedded_io::{ErrorKind, WriteAllError};
+use embedded_io::WriteFmtError;
 
 #[allow(unused_imports)]
 use crate::prelude::*;
 
 #[derive(Debug)]
 pub enum Error {
+    FmtError,
+    WriteZero,
+    #[cfg(feature = "defmt")]
+    DefmtFmtError,
     #[cfg(feature = "serde_json")]
     SerdeError(serde_json::Error),
-    BufferTooSmall(usize, usize),
-    FmtError,
-    Other(&'static str),
-    IoError(ErrorKind),
+    ErrorKind(ErrorKind),
 }
 
 #[cfg(feature = "defmt")]
 impl defmt::Format for Error {
     fn format(&self, fmt: defmt::Formatter) {
         match self {
+            Error::DefmtFmtError => {
+                defmt::write!(fmt, "DefmtFmtError");
+            }
+            Error::WriteZero => {
+                defmt::write!(fmt, "WriteZero");
+            }
             #[cfg(feature = "serde_json")]
             Error::SerdeError(e) => {
                 #[cfg(not(feature = "alloc"))]
@@ -26,29 +33,45 @@ impl defmt::Format for Error {
                 #[cfg(feature = "alloc")]
                 defmt::write!(fmt, "SerdeError({})", e.to_string());
             }
-            Error::BufferTooSmall(s1, s2) => {
-                defmt::write!(fmt, "BufferTooSmall({}, {})", s1, s2);
-            }
             Error::FmtError => {
                 defmt::write!(fmt, "FmtError");
             }
-            Error::Other(s) => {
-                defmt::write!(fmt, "Other({})", s);
-            }
-            Error::IoError(k) => {
-                defmt::write!(fmt, "IoError({})", k);
+            Error::ErrorKind(e) => {
+                defmt::write!(fmt, "ErrorKind({:?})", e);
             }
         }
         // Format as hexadecimal.
     }
 }
 
-impl From<core::fmt::Error> for Error {
-    fn from(_e: core::fmt::Error) -> Self {
-        #[cfg(all(feature = "defmt", feature = "alloc"))]
-        warn!("FmtError({})", _e.to_string());
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
 
-        Self::FmtError
+impl<E: embedded_io::Error> From<WriteAllError<E>> for Error {
+    fn from(e: WriteAllError<E>) -> Self {
+        match e {
+            WriteAllError::WriteZero => Self::WriteZero,
+            WriteAllError::Other(e) => Self::ErrorKind(e.kind()),
+        }
+    }
+}
+
+impl<E: embedded_io::Error> From<WriteFmtError<E>> for Error {
+    fn from(e: WriteFmtError<E>) -> Self {
+        match e {
+            WriteFmtError::WriteZero => Self::WriteZero,
+            WriteFmtError::FmtError => Self::FmtError,
+            WriteFmtError::Other(e) => Self::ErrorKind(e.kind()),
+        }
+    }
+}
+
+impl From<ErrorKind> for Error {
+    fn from(e: ErrorKind) -> Self {
+        Self::ErrorKind(e)
     }
 }
 
@@ -59,38 +82,15 @@ impl From<serde_json::Error> for Error {
     }
 }
 
-impl From<Error> for core::fmt::Error {
-    fn from(_: Error) -> Self {
-        core::fmt::Error
-    }
-}
-
-impl From<&dyn embedded_io::Error> for Error {
-    fn from(e: &dyn embedded_io::Error) -> Self {
-        Self::from(e.kind())
-    }
-}
-
-impl<E> From<WriteFmtError<E>> for Error {
-    fn from(e: WriteFmtError<E>) -> Self {
-        match e {
-            WriteFmtError::FmtError => Error::FmtError,
-            WriteFmtError::Other(_) => Error::IoError(ErrorKind::Other),
+impl embedded_io::Error for Error {
+    fn kind(&self) -> ErrorKind {
+        match self {
+            Error::ErrorKind(e) => { *e }
+            _ => { ErrorKind::Other }
         }
     }
 }
 
-impl From<ErrorKind> for Error {
-    fn from(ek: ErrorKind) -> Self {
-        Self::IoError(ek)
-    }
-}
-
-impl core::fmt::Display for Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
 
 #[cfg(feature = "unstable")]
 mod unstable {
