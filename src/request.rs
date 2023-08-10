@@ -11,7 +11,7 @@ use crate::prelude::*;
 use http::{HeaderName, HeaderValue, Request};
 use http::uri::PathAndQuery;
 
-const USER_AGENT: HeaderValue = HeaderValue::from_static(":)");
+static USER_AGENT: HeaderValue = HeaderValue::from_static(":)");
 
 
 pub struct RequestWrapper<T> {
