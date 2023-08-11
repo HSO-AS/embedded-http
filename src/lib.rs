@@ -21,6 +21,8 @@ pub mod error;
 pub mod request;
 pub mod response;
 
+mod mime;
+
 #[cfg(test)]
 pub(crate) mod test_client;
 

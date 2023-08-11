@@ -79,7 +79,7 @@ impl<T: Serialize> RequestWrapper<T> {
         let body = serde_json::to_string(&self.inner.body())?;
 
         self.write_header(&mut w, &[
-            (&http::header::CONTENT_TYPE, &HeaderValue::from_static(mime::APPLICATION_JSON.as_ref())),
+            (&http::header::CONTENT_TYPE, &HeaderValue::from_static(crate::mime::APPLICATION_JSON)),
             (&http::header::CONTENT_LENGTH, &HeaderValue::from(body.len())),
         ])?;
 
@@ -181,7 +181,7 @@ impl<'a> ToRequestBody for &'a str {
     }
 
     fn content_type(&self) -> Option<HeaderValue> {
-        Some(HeaderValue::from_static(mime::TEXT_PLAIN_UTF_8.as_ref()))
+        Some(HeaderValue::from_static(crate::mime::TEXT_PLAIN_UTF_8))
     }
 
     fn content_length(&self) -> Option<HeaderValue> {
@@ -195,7 +195,7 @@ impl<'a> ToRequestBody for &'a [u8] {
     }
 
     fn content_type(&self) -> Option<HeaderValue> {
-        Some(HeaderValue::from_static(mime::APPLICATION_OCTET_STREAM.as_ref()))
+        Some(HeaderValue::from_static(crate::mime::APPLICATION_OCTET_STREAM))
     }
 
     fn content_length(&self) -> Option<HeaderValue> {
@@ -357,7 +357,7 @@ mod tests {
 
         // check content type
         let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(from_utf8(ct.value).unwrap(), mime::TEXT_PLAIN_UTF_8.as_ref());
+        assert_eq!(from_utf8(ct.value).unwrap(), crate::mime::TEXT_PLAIN_UTF_8);
 
         // check validity of request
         assert!(body_status.is_complete());
@@ -390,7 +390,7 @@ mod tests {
 
         // check content type
         let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(from_utf8(ct.value).unwrap(), mime::APPLICATION_OCTET_STREAM.as_ref());
+        assert_eq!(from_utf8(ct.value).unwrap(), crate::mime::APPLICATION_OCTET_STREAM);
 
         // check validity of request
         assert!(body_status.is_complete());
@@ -424,7 +424,7 @@ mod tests {
 
         // check content type
         let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(from_utf8(ct.value).unwrap(), mime::APPLICATION_JSON.as_ref());
+        assert_eq!(from_utf8(ct.value).unwrap(), crate::mime::APPLICATION_JSON);
 
         // check validity of request
         assert!(body_status.is_complete());
@@ -532,7 +532,7 @@ mod tests {
 
         // check content type
         let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(from_utf8(ct.value).unwrap(), mime::APPLICATION_JSON.as_ref());
+        assert_eq!(from_utf8(ct.value).unwrap(), crate::mime::APPLICATION_JSON);
 
         // check validity of request
         assert!(body_status.is_complete());
