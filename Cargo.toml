@@ -20,6 +20,8 @@ http = { version = "0.2.9", default-features = false }
 
 mime = { version = "0.3.17", default-features = false }
 
+fnv = { version = "1.0", default-features = false }
+
 [features]
 
 alloc = ["embedded-io/alloc", "defmt?/alloc"]
