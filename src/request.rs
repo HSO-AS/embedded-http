@@ -8,57 +8,121 @@ use crate::{Error, Result};
 #[allow(unused_imports)]
 use crate::prelude::*;
 
-use http::{HeaderName, HeaderValue, Request};
-use http::uri::PathAndQuery;
+use crate::header::{HeaderValue, HeaderKey};
 
-static USER_AGENT: HeaderValue = HeaderValue::from_static(":)");
+use core::fmt::Display;
+
+use crate::uri::Uri;
+
+static USER_AGENT: HeaderValue<'static> = HeaderValue::from_static(b":)");
 
 
-pub struct RequestWrapper<T> {
-    pub inner: Request<T>,
+pub struct RequestWrapper<'a, T> {
+    pub header: Header<'a>,
+    pub body: T,
 }
 
-impl<T> From<Request<T>> for RequestWrapper<T> {
-    fn from(inner: Request<T>) -> Self {
-        Self { inner }
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Header<'a> {
+    pub method: Method,
+    pub uri: Uri<'a>,
+    pub headers: Vec<(HeaderKey<'a>, HeaderValue<'a>)>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Method {
+    Options,
+    Get,
+    Post,
+    Put,
+    Delete,
+    Head,
+    Trace,
+    Connect,
+    Patch,
+}
 
-impl<T> RequestWrapper<T> {
-    pub fn new(request: Request<T>) -> Self {
-        Self {
-            inner: request,
+impl<'a> Header<'a> {
+    pub fn into_owned(self) -> Header<'static> {
+        Header {
+            method: self.method,
+            uri: self.uri.into_owned(),
+            headers: self.headers.into_iter().map(|(k, v)| (k.into_owned(), v.into_owned())).collect(),
         }
     }
 
-    fn write_header<W: Write>(&self, mut w: W, extra_headers: &[(&HeaderName, &HeaderValue)]) -> Result<(), Error> {
-        fn write_header_value<W: Write>(name: &HeaderName, value: &HeaderValue, w: &mut W) -> Result<()> {
+    pub fn into_borrowed<'b: 'a>(&'b self) -> Header<'b> {
+        Header {
+            method: self.method,
+            uri: self.uri.into_borrowed(),
+            headers: self.headers.iter().map(|(k, v)| (k.into_borrowed(), v.into_borrowed())).collect(),
+        }
+    }
+}
+
+impl Display for Method {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.str())
+    }
+}
+
+impl Method {
+    pub fn str(&self) -> &'static str {
+        match self {
+            Method::Options => "OPTIONS",
+            Method::Get => "GET",
+            Method::Post => "POST",
+            Method::Put => "PUT",
+            Method::Delete => "DELETE",
+            Method::Head => "HEAD",
+            Method::Trace => "TRACE",
+            Method::Connect => "CONNECT",
+            Method::Patch => "PATCH",
+        }
+    }
+}
+
+impl<'a, T> RequestWrapper<'a, T> {
+    pub fn new(method: Method, uri: Uri<'a>, body: T) -> Self {
+        Self {
+            header: Header {
+                method,
+                uri,
+                headers: Vec::new(),
+            },
+            body,
+        }
+    }
+}
+
+
+impl<'a, T> RequestWrapper<'a, T> {
+    fn write_header<W: Write>(&self, mut w: W, extra_headers: &[(&HeaderKey, &HeaderValue)]) -> Result<(), Error> {
+        fn write_header_value<W: Write>(name: &HeaderKey, value: &HeaderValue, w: &mut W) -> Result<()> {
             write!(w, "{}: ", name)?;
-            w.write_all(value.as_bytes())?;
+            w.write_all(value.as_ref())?;
             write!(w, "\r\n")?;
             Ok(())
         }
 
-        write!(w, "{} {} HTTP/1.1\r\n", self.inner.method(), self.inner.uri().path_and_query()
-            .unwrap_or(&PathAndQuery::from_static("/")))?;
+        write!(w, "{} {} HTTP/1.1\r\n", &self.header.method, self.header.uri.path_and_query)?;
 
         // write host field
         write_header_value(
-            &http::header::HOST,
-            &HeaderValue::from_str(self.inner.uri().host().unwrap_or("")).unwrap(),
+            &crate::header::HOST,
+            &self.header.uri.authority.as_ref().into(),
             &mut w)?;
 
         // write user agent field
         write_header_value(
-            &http::header::USER_AGENT,
+            &crate::header::USER_AGENT,
             &USER_AGENT,
             &mut w)?;
 
         for (name, value) in
-        self.inner.headers().iter()
-            .filter(|(key, _)| key.ne(&http::header::USER_AGENT))
-            .filter(|(key, _)| key.ne(&http::header::HOST))
+        self.header.headers.iter()
+            .filter(|(key, _)| key.ne(&crate::header::USER_AGENT))
+            .filter(|(key, _)| key.ne(&crate::header::HOST))
         {
             write_header_value(name, value, &mut w)?;
         }
@@ -74,13 +138,15 @@ impl<T> RequestWrapper<T> {
 }
 
 #[cfg(feature = "serde_json")]
-impl<T: Serialize> RequestWrapper<T> {
+impl<'a, T: Serialize> RequestWrapper<'a, T> {
     pub fn write_json_to<W: Write>(&self, mut w: W) -> Result<()> {
-        let body = serde_json::to_string(&self.inner.body())?;
+        let body = serde_json::to_string(&self.body)?;
 
+        let mut b = itoa::Buffer::new();
+        let cl = b.format(body.len());
         self.write_header(&mut w, &[
-            (&http::header::CONTENT_TYPE, &HeaderValue::from_static(crate::mime::APPLICATION_JSON)),
-            (&http::header::CONTENT_LENGTH, &HeaderValue::from(body.len())),
+            (&crate::header::CONTENT_TYPE, &crate::mime::APPLICATION_JSON),
+            (&crate::header::CONTENT_LENGTH, &cl.into()),
         ])?;
 
         w.write_all(body.as_bytes())?;
@@ -97,10 +163,10 @@ impl<T: Serialize> RequestWrapper<T> {
 }
 
 
-impl<T: ToRequestBody> RequestWrapper<T> {
+impl<'a, T: ToRequestBody> RequestWrapper<'a, T> {
     pub fn write_to<W: Write>(&self, mut w: W) -> Result<()> {
         // If there is no content type, we can just write the header and be done
-        let ct = if let Some(ct) = self.inner.body().content_type() {
+        let ct = if let Some(ct) = self.body.content_type() {
             ct
         } else {
             self.write_header(&mut w, &[])?;
@@ -110,25 +176,25 @@ impl<T: ToRequestBody> RequestWrapper<T> {
         let mut body = None;
 
         // If the content length is known, we can write the body directly to the writer
-        let cl = if let Some(cl) = self.inner.body().content_length() {
+        let cl = if let Some(cl) = self.body.content_length() {
             cl
         } else {
             let mut body_inner = Vec::new();
-            self.inner.body().write_body(&mut body_inner)?;
-            let cl = HeaderValue::from(body_inner.len());
+            self.body.write_body(&mut body_inner)?;
+            let cl = body_inner.len();
             body = Some(body_inner);
             cl
         };
 
         self.write_header(&mut w, &[
-            (&http::header::CONTENT_TYPE, &ct),
-            (&http::header::CONTENT_LENGTH, &cl),
+            (&crate::header::CONTENT_TYPE, &ct.into()),
+            (&crate::header::CONTENT_LENGTH, &itoa::Buffer::new().format(cl).into()),
         ])?;
 
         if let Some(b) = body {
             w.write_all(&b)?;
         } else {
-            self.inner.body().write_body(&mut w)?;
+            self.body.write_body(&mut w)?;
         }
 
         Ok(())
@@ -144,9 +210,9 @@ impl<T: ToRequestBody> RequestWrapper<T> {
 pub trait ToRequestBody {
     fn write_body<W: Write>(&self, w: W) -> Result<()>;
 
-    fn content_type(&self) -> Option<HeaderValue>;
+    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>>;
 
-    fn content_length(&self) -> Option<HeaderValue> {
+    fn content_length(&self) -> Option<usize> {
         None
     }
 }
@@ -156,11 +222,11 @@ impl<B: ToRequestBody> ToRequestBody for &B {
         (*self).write_body(w)
     }
 
-    fn content_type(&self) -> Option<HeaderValue> {
+    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
         (*self).content_type()
     }
 
-    fn content_length(&self) -> Option<HeaderValue> {
+    fn content_length(&self) -> Option<usize> {
         (*self).content_length()
     }
 }
@@ -170,38 +236,83 @@ impl ToRequestBody for () {
         Ok(())
     }
 
-    fn content_type(&self) -> Option<HeaderValue> {
+    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
         None
     }
 }
 
-impl<'a> ToRequestBody for &'a str {
+impl<'body> ToRequestBody for &'body str {
     fn write_body<W: Write>(&self, mut w: W) -> Result<()> {
         Ok(w.write_all(self.as_bytes())?)
     }
 
-    fn content_type(&self) -> Option<HeaderValue> {
-        Some(HeaderValue::from_static(crate::mime::TEXT_PLAIN_UTF_8))
+    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
+        Some(crate::mime::TEXT_PLAIN_UTF_8)
     }
 
-    fn content_length(&self) -> Option<HeaderValue> {
-        Some(HeaderValue::from(self.len()))
+    fn content_length(&self) -> Option<usize> {
+        Some(self.len())
     }
 }
 
-impl<'a> ToRequestBody for &'a [u8] {
+impl<'body> ToRequestBody for &'body [u8] {
     fn write_body<W: Write>(&self, mut w: W) -> Result<()> {
         Ok(w.write_all(self)?)
     }
 
-    fn content_type(&self) -> Option<HeaderValue> {
-        Some(HeaderValue::from_static(crate::mime::APPLICATION_OCTET_STREAM))
+    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
+        Some(crate::mime::APPLICATION_OCTET_STREAM)
     }
 
-    fn content_length(&self) -> Option<HeaderValue> {
-        Some(HeaderValue::from(self.len()))
+    fn content_length(&self) -> Option<usize> {
+        Some(self.len())
     }
 }
+
+
+pub struct RequestBuilder<'a> {
+    headers: Vec<(HeaderKey<'a>, HeaderValue<'a>)>,
+    method: Method,
+    uri: Uri<'a>,
+}
+
+impl<'a> RequestBuilder<'a> {
+    pub fn get(uri: &'a str) -> Result<Self> {
+        Ok(Self {
+            headers: Vec::new(),
+            method: Method::Get,
+            uri: Uri::parse(uri)?,
+        })
+    }
+
+    pub fn post(uri: &'a str) -> Result<Self> {
+        Ok(Self {
+            headers: Vec::new(),
+            method: Method::Post,
+            uri: Uri::parse(uri)?,
+        })
+    }
+
+    pub fn put(uri: &'a str) -> Result<Self> {
+        Ok(Self {
+            headers: Vec::new(),
+            method: Method::Put,
+            uri: Uri::parse(uri)?,
+        })
+    }
+
+    pub fn body<T>(self, body: T) -> RequestWrapper<'a, T> {
+        RequestWrapper {
+            header: Header {
+                method: self.method,
+                uri: self.uri,
+                headers: self.headers,
+            },
+            body,
+        }
+    }
+}
+
 
 /*
 impl<T> Request<'a, D> {
@@ -303,12 +414,9 @@ mod tests {
 
     #[test]
     fn build_no_body() {
-        let request = Request::get("https://api.aqsense.no/v1/health").body(()).unwrap();
-        let req = RequestWrapper::from(request);
+        let req = RequestBuilder::get("https://api.aqsense.no/v1/health").unwrap().body(());
 
-        let mut buf = Vec::new();
-
-        req.write_to(&mut buf).unwrap();
+        let buf = req.to_vec().unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
 
@@ -336,12 +444,9 @@ mod tests {
     #[test]
     fn build_str_body() {
         let body = "hei";
-        let req = Request::post("https://google.com/").body(body).unwrap();
-        let req = RequestWrapper::from(req);
+        let req = RequestBuilder::post("https://google.com/").unwrap().body(body);
 
-        let mut buf = Vec::new();
-        req.write_to(&mut buf).unwrap();
-
+        let buf = req.to_vec().unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
 
@@ -357,7 +462,7 @@ mod tests {
 
         // check content type
         let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(from_utf8(ct.value).unwrap(), crate::mime::TEXT_PLAIN_UTF_8);
+        assert_eq!(ct.value, crate::mime::TEXT_PLAIN_UTF_8.as_ref());
 
         // check validity of request
         assert!(body_status.is_complete());
@@ -369,12 +474,9 @@ mod tests {
     #[test]
     fn build_byte_body() {
         let body = b"hei";
-        let req = Request::post("https://google.com/").body(body.as_slice()).unwrap();
-        let req = RequestWrapper::from(req);
+        let req = RequestBuilder::post("https://google.com/").unwrap().body(body.as_slice());
 
-        let mut buf = Vec::new();
-        req.write_to(&mut buf).unwrap();
-
+        let buf = req.to_vec().unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
 
@@ -390,7 +492,7 @@ mod tests {
 
         // check content type
         let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(from_utf8(ct.value).unwrap(), crate::mime::APPLICATION_OCTET_STREAM);
+        assert_eq!(ct.value, crate::mime::APPLICATION_OCTET_STREAM.inner.as_ref());
 
         // check validity of request
         assert!(body_status.is_complete());
@@ -403,12 +505,9 @@ mod tests {
     #[test]
     fn build_json_body() {
         let body = "hei";
-        let req = Request::post("https://google.com/").body(body).unwrap();
-        let req = RequestWrapper::from(req);
+        let req = RequestBuilder::post("https://google.com/").unwrap().body(body);
 
-        let mut buf = Vec::new();
-        req.write_json_to(&mut buf).unwrap();
-
+        let buf = req.to_json_vec().unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
 
@@ -424,7 +523,7 @@ mod tests {
 
         // check content type
         let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(from_utf8(ct.value).unwrap(), crate::mime::APPLICATION_JSON);
+        assert_eq!(ct.value, crate::mime::APPLICATION_JSON.as_ref());
 
         // check validity of request
         assert!(body_status.is_complete());
@@ -459,23 +558,21 @@ mod tests {
             Ok(w.write_all(self.as_ref())?)
         }
 
-        fn content_type(&self) -> Option<HeaderValue> {
-            Some(HeaderValue::from_static("application/test"))
+        fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
+            Some("application/test".into())
         }
 
-        fn content_length(&self) -> Option<HeaderValue> {
-            Some(HeaderValue::from_static("8"))
+        fn content_length(&self) -> Option<usize> {
+            Some(8)
         }
     }
 
     #[test]
     fn build_custom() {
         let body = TestStruct { a: 1, b: 2 };
-        let req = http::Request::post("https://google.com/").body(&body).unwrap();
-        let req = RequestWrapper::from(req);
+        let req = RequestBuilder::post("https://google.com/").unwrap().body(&body);
 
-        let mut buf = Vec::new();
-        req.write_to(&mut buf).unwrap();
+        let buf = req.to_vec().unwrap();
 
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
@@ -511,12 +608,10 @@ mod tests {
     #[test]
     fn build_custom_json() {
         let body = TestStruct { a: 1, b: 2 };
-        let req = http::Request::post("https://google.com/").body(&body).unwrap();
-        let req = RequestWrapper::from(req);
+        let req = RequestBuilder::post("https://google.com/").unwrap().body(&body);
 
-        let mut buf = Vec::new();
-        req.write_json_to(&mut buf).unwrap();
 
+        let buf = req.to_json_vec().unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
 
@@ -532,7 +627,7 @@ mod tests {
 
         // check content type
         let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(from_utf8(ct.value).unwrap(), crate::mime::APPLICATION_JSON);
+        assert_eq!(ct.value, crate::mime::APPLICATION_JSON.as_ref());
 
         // check validity of request
         assert!(body_status.is_complete());

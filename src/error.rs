@@ -13,6 +13,7 @@ pub enum Error {
     #[cfg(feature = "serde_json")]
     SerdeError(serde_json::Error),
     ErrorKind(ErrorKind),
+    InvalidUri,
 }
 
 #[cfg(feature = "defmt")]

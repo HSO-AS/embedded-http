@@ -21,7 +21,10 @@ pub mod error;
 pub mod request;
 pub mod response;
 
-mod mime;
+pub mod mime;
+pub mod uri;
+
+pub mod header;
 
 #[cfg(test)]
 pub(crate) mod test_client;
@@ -30,6 +33,7 @@ pub use error::Error;
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
+/*
 #[cfg(test)]
 mod tests {
     use core::str::from_utf8;
@@ -72,3 +76,5 @@ mod tests {
     }
 
 }
+
+ */

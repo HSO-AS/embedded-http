@@ -1,6 +1,6 @@
 [package]
 name = "embedded-http"
-version = "0.5.0-beta.0"
+version = "0.5.0-beta.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,10 +16,9 @@ embedded-io = { version = "0.5.0", features = ["alloc"] }
 
 chrono = { version = "0.4", default-features = false, features = [] }
 
-http = { version = "0.2.9", default-features = false }
 
+itoa = { version = "1.0.9", default-features = false }
 
-fnv = { version = "1.0", default-features = false }
 
 [features]
 
@@ -30,6 +29,7 @@ defmt = ["dep:defmt", "embedded-io/defmt-03"]
 unstable = []
 
 [dev-dependencies]
+http = { version = "0.2.9", default-features = false }
 
 serde = { version = "1" }
 
