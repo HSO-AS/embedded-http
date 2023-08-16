@@ -247,7 +247,7 @@ impl<'body> ToRequestBody for &'body str {
     }
 
     fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
-        Some(crate::mime::TEXT_PLAIN_UTF_8)
+        Some(crate::mime::TEXT_PLAIN_UTF_8.into_borrowed())
     }
 
     fn content_length(&self) -> Option<usize> {
@@ -261,7 +261,7 @@ impl<'body> ToRequestBody for &'body [u8] {
     }
 
     fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
-        Some(crate::mime::APPLICATION_OCTET_STREAM)
+        Some(crate::mime::APPLICATION_OCTET_STREAM.into_borrowed())
     }
 
     fn content_length(&self) -> Option<usize> {
