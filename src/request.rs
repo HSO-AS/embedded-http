@@ -17,7 +17,7 @@ use crate::uri::Uri;
 static USER_AGENT: HeaderValue<'static> = HeaderValue::from_static(b":)");
 
 
-pub struct RequestWrapper<'a, T> {
+pub struct Request<'a, T> {
     pub header: Header<'a>,
     pub body: T,
 }
@@ -82,7 +82,7 @@ impl Method {
     }
 }
 
-impl<'a, T> RequestWrapper<'a, T> {
+impl<'a, T> Request<'a, T> {
     pub fn new(method: Method, uri: Uri<'a>, body: T) -> Self {
         Self {
             header: Header {
@@ -96,7 +96,7 @@ impl<'a, T> RequestWrapper<'a, T> {
 }
 
 
-impl<'a, T> RequestWrapper<'a, T> {
+impl<'a, T> Request<'a, T> {
     fn write_header<W: Write>(&self, mut w: W, extra_headers: &[(&HeaderKey, &HeaderValue)]) -> Result<(), Error> {
         fn write_header_value<W: Write>(name: &HeaderKey, value: &HeaderValue, w: &mut W) -> Result<()> {
             write!(w, "{}: ", name)?;
@@ -138,7 +138,7 @@ impl<'a, T> RequestWrapper<'a, T> {
 }
 
 #[cfg(feature = "serde_json")]
-impl<'a, T: Serialize> RequestWrapper<'a, T> {
+impl<'a, T: Serialize> Request<'a, T> {
     pub fn write_json_to<W: Write>(&self, mut w: W) -> Result<()> {
         let body = serde_json::to_string(&self.body)?;
 
@@ -163,7 +163,7 @@ impl<'a, T: Serialize> RequestWrapper<'a, T> {
 }
 
 
-impl<'a, T: ToRequestBody> RequestWrapper<'a, T> {
+impl<'a, T: ToRequestBody> Request<'a, T> {
     pub fn write_to<W: Write>(&self, mut w: W) -> Result<()> {
         // If there is no content type, we can just write the header and be done
         let ct = if let Some(ct) = self.body.content_type() {
@@ -301,8 +301,8 @@ impl<'a> RequestBuilder<'a> {
         })
     }
 
-    pub fn body<T>(self, body: T) -> RequestWrapper<'a, T> {
-        RequestWrapper {
+    pub fn body<T>(self, body: T) -> Request<'a, T> {
+        Request {
             header: Header {
                 method: self.method,
                 uri: self.uri,
