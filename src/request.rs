@@ -210,7 +210,7 @@ impl<'a, T: ToRequestBody> Request<'a, T> {
 pub trait ToRequestBody {
     fn write_body<W: Write>(&self, w: W) -> Result<()>;
 
-    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>>;
+    fn content_type(&self) -> Option<HeaderValue<'_>>;
 
     fn content_length(&self) -> Option<usize> {
         None
