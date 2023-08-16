@@ -1,21 +1,25 @@
 use crate::{Error, Result};
 
 use alloc::borrow::Cow;
+use core::ops::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Uri<'a> {
-    pub scheme: Cow<'a, str>,
-    pub authority: Cow<'a, str>,
-    pub path_and_query: Cow<'a, str>,
+    pub inner: Cow<'a, str>,
+    scheme: Range<usize>,
+    authority: Range<usize>,
+    path_and_query: Range<usize>,
 }
 
 impl<'a> Uri<'a> {
-    pub fn parse(s: &'a str) -> Result<Self> {
+    pub fn parse<S: Into<Cow<'a, str>>>(uri: S) -> Result<Self> {
         let mut start_idx = 0;
+
+        let s = uri.into();
 
         let scheme = match s.find("://") {
             Some(idx) => {
-                let scheme = Cow::Borrowed(&s[start_idx..idx]);
+                let scheme = start_idx..idx;
                 start_idx = idx + 3;
                 scheme
             }
@@ -24,7 +28,7 @@ impl<'a> Uri<'a> {
 
         let authority = match s[start_idx..].find('/') {
             Some(idx) => {
-                let authority = Cow::Borrowed(&s[start_idx..start_idx + idx]);
+                let authority = start_idx..start_idx + idx;
                 start_idx = start_idx + idx;
                 authority
             }
@@ -33,9 +37,10 @@ impl<'a> Uri<'a> {
             }
         };
 
-        let path_and_query = Cow::Borrowed(&s[start_idx..]);
+        let path_and_query = start_idx..s.len();
 
         Ok(Self {
+            inner: s,
             scheme,
             authority,
             path_and_query,
@@ -44,21 +49,59 @@ impl<'a> Uri<'a> {
 
     pub fn into_owned(self) -> Uri<'static> {
         Uri {
-            scheme: Cow::Owned(self.scheme.into_owned()),
-            authority: Cow::Owned(self.authority.into_owned()),
-            path_and_query: Cow::Owned(self.path_and_query.into_owned()),
+            inner: Cow::Owned(self.inner.into_owned()),
+            scheme: self.scheme.clone(),
+            authority: self.authority.clone(),
+            path_and_query: self.path_and_query.clone(),
         }
     }
 
-    pub fn into_borrowed<'b: 'a>(&'b self) -> Uri<'a> {
+    pub fn into_borrowed<'c: 'a>(&'c self) -> Uri<'a> {
         Uri {
-            scheme: Cow::Borrowed(self.scheme.as_ref()),
-            authority: Cow::Borrowed(self.authority.as_ref()),
-            path_and_query: Cow::Borrowed(self.path_and_query.as_ref()),
+            inner: Cow::Borrowed(self.inner.as_ref()),
+            scheme: self.scheme.clone(),
+            authority: self.authority.clone(),
+            path_and_query: self.path_and_query.clone(),
         }
+    }
+
+    pub fn scheme(&self) -> &str {
+        &self.inner[self.scheme.clone()]
+    }
+
+    pub fn authority(&self) -> &str {
+        &self.inner[self.authority.clone()]
+    }
+
+    pub fn path_and_query(&self) -> &str {
+        &self.inner[self.path_and_query.clone()]
     }
 }
 
+
+impl<'a> TryFrom<Cow<'a, str>> for Uri<'a> {
+    type Error = Error;
+
+    fn try_from(s: Cow<'a, str>) -> Result<Self> {
+        Self::parse(s)
+    }
+}
+
+impl<'a> TryFrom<&'a str> for Uri<'a> {
+    type Error = Error;
+
+    fn try_from(s: &'a str) -> Result<Self> {
+        Self::parse(s)
+    }
+}
+
+impl TryFrom<alloc::string::String> for Uri<'static> {
+    type Error = Error;
+
+    fn try_from(s: alloc::string::String) -> Result<Self> {
+        Self::parse(s)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -74,12 +117,12 @@ mod tests {
 
     #[test]
     fn test_parse() {
-        for uri in URIS {
+        for &uri in URIS {
             let uri1 = Uri::parse(uri).unwrap();
             let uri2 = http::Uri::from_static(uri);
-            assert_eq!(uri2.scheme_str().unwrap(), uri1.scheme.as_ref());
-            assert_eq!(uri2.authority().unwrap(), uri1.authority.as_ref());
-            assert_eq!(uri2.path_and_query().unwrap(), uri1.path_and_query.as_ref());
+            assert_eq!(uri2.scheme_str().unwrap(), uri1.scheme());
+            assert_eq!(uri2.authority().unwrap(), uri1.authority());
+            assert_eq!(uri2.path_and_query().unwrap(), uri1.path_and_query());
         }
     }
 

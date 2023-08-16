@@ -105,12 +105,12 @@ impl<'a, T> Request<'a, T> {
             Ok(())
         }
 
-        write!(w, "{} {} HTTP/1.1\r\n", &self.header.method, self.header.uri.path_and_query)?;
+        write!(w, "{} {} HTTP/1.1\r\n", &self.header.method, self.header.uri.path_and_query())?;
 
         // write host field
         write_header_value(
             &crate::header::HOST,
-            &self.header.uri.authority.as_ref().into(),
+            &self.header.uri.authority().into(),
             &mut w)?;
 
         // write user agent field
@@ -277,30 +277,32 @@ pub struct RequestBuilder<'a> {
 }
 
 impl<'a> RequestBuilder<'a> {
-    pub fn get(uri: &'a str) -> Result<Self> {
+    pub fn get<U: TryInto<Uri<'a>>>(uri: U) -> Result<Self, U::Error> {
         Ok(Self {
             headers: Vec::new(),
             method: Method::Get,
-            uri: Uri::parse(uri)?,
+            uri: uri.try_into()?,
         })
     }
 
-    pub fn post(uri: &'a str) -> Result<Self> {
+    pub fn post<U: TryInto<Uri<'a>>>(uri: U) -> Result<Self, U::Error> {
         Ok(Self {
             headers: Vec::new(),
             method: Method::Post,
-            uri: Uri::parse(uri)?,
+            uri: uri.try_into()?,
         })
     }
 
-    pub fn put(uri: &'a str) -> Result<Self> {
+    pub fn put<U: TryInto<Uri<'a>>>(uri: U) -> Result<Self, U::Error> {
         Ok(Self {
             headers: Vec::new(),
             method: Method::Put,
-            uri: Uri::parse(uri)?,
+            uri: uri.try_into()?,
         })
     }
+}
 
+impl<'a> RequestBuilder<'a> {
     pub fn body<T>(self, body: T) -> Request<'a, T> {
         Request {
             header: Header {
