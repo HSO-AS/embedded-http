@@ -300,9 +300,12 @@ impl<'a> RequestBuilder<'a> {
             uri: uri.try_into()?,
         })
     }
-}
 
-impl<'a> RequestBuilder<'a> {
+    pub fn insert_header(mut self, header: (HeaderKey<'a>, HeaderValue<'a>)) -> Self {
+        self.headers.push(header);
+        self
+    }
+
     pub fn body<T>(self, body: T) -> Request<'a, T> {
         Request {
             header: Header {
