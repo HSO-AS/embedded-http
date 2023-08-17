@@ -316,7 +316,12 @@ impl<'a> RequestBuilder<'a> {
             body,
         }
     }
+
+    pub fn build(self) -> Request<'a, ()> {
+        self.body(())
+    }
 }
+
 
 
 /*
