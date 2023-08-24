@@ -1,6 +1,7 @@
 //! Sample of common used HTTP header keys.
 //!
 
+use crate::alloc::borrow::ToOwned;
 use alloc::borrow::Cow;
 use alloc::string::String;
 use core::fmt::Display;
@@ -106,6 +107,29 @@ impl<'a> From<&'a [u8]> for HeaderValue<'a> {
         }
     }
 }
+
+macro_rules! impl_integer {
+    ($int:ident) => {
+        impl From<$int> for HeaderValue<'static> {
+            fn from(s: $int) -> Self {
+                itoa::Buffer::new().format(s).to_owned().into()
+            }
+        }
+    };
+}
+
+impl_integer!(u8);
+impl_integer!(u16);
+impl_integer!(u32);
+impl_integer!(u64);
+impl_integer!(u128);
+impl_integer!(i8);
+impl_integer!(i16);
+impl_integer!(i32);
+impl_integer!(i64);
+impl_integer!(i128);
+impl_integer!(isize);
+impl_integer!(usize);
 
 pub static ACCEPT: HeaderKey<'static> = HeaderKey::from_static("accept");
 
