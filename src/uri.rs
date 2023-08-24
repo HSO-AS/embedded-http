@@ -103,6 +103,15 @@ impl TryFrom<alloc::string::String> for Uri<'static> {
     }
 }
 
+
+impl<'a> TryFrom<&'a Uri<'a>> for Uri<'a> {
+    type Error = Error;
+
+    fn try_from(s: &'a Uri<'a>) -> Result<Self> {
+        Ok(s.into_borrowed())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

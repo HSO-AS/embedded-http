@@ -2,6 +2,7 @@
 //!
 
 use alloc::borrow::Cow;
+use alloc::string::String;
 use core::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -20,13 +21,11 @@ pub struct HeaderValue<'a> {
     pub inner: Cow<'a, [u8]>,
 }
 
-
 impl AsRef<[u8]> for HeaderValue<'_> {
     fn as_ref(&self) -> &[u8] {
         self.inner.as_ref()
     }
 }
-
 
 impl<'a> HeaderKey<'a> {
     pub const fn from_static(s: &'static str) -> HeaderKey<'static> {
@@ -55,7 +54,6 @@ impl<'a> HeaderValue<'a> {
         }
     }
 
-
     pub fn into_owned(self) -> HeaderValue<'static> {
         HeaderValue {
             inner: Cow::Owned(self.inner.into_owned()),
@@ -77,6 +75,22 @@ impl<'a> From<&'a str> for HeaderKey<'a> {
     }
 }
 
+impl From<String> for HeaderValue<'static> {
+    fn from(s: String) -> Self {
+        Self {
+            inner: Cow::Owned(s.into_bytes()),
+        }
+    }
+}
+
+impl From<String> for HeaderKey<'static> {
+    fn from(s: String) -> Self {
+        Self {
+            inner: Cow::Owned(s),
+        }
+    }
+}
+
 impl<'a> From<&'a str> for HeaderValue<'a> {
     fn from(s: &'a str) -> Self {
         Self {
@@ -93,7 +107,6 @@ impl<'a> From<&'a [u8]> for HeaderValue<'a> {
     }
 }
 
-
 pub static ACCEPT: HeaderKey<'static> = HeaderKey::from_static("accept");
 
 pub static ACCEPT_CHARSET: HeaderKey<'static> = HeaderKey::from_static("accept-charset");
@@ -104,21 +117,29 @@ pub static ACCEPT_LANGUAGE: HeaderKey<'static> = HeaderKey::from_static("accept-
 
 pub static ACCEPT_RANGES: HeaderKey<'static> = HeaderKey::from_static("accept-ranges");
 
-pub static ACCESS_CONTROL_ALLOW_CREDENTIALS: HeaderKey<'static> = HeaderKey::from_static("access-control-allow-credentials");
+pub static ACCESS_CONTROL_ALLOW_CREDENTIALS: HeaderKey<'static> =
+    HeaderKey::from_static("access-control-allow-credentials");
 
-pub static ACCESS_CONTROL_ALLOW_HEADERS: HeaderKey<'static> = HeaderKey::from_static("access-control-allow-headers");
+pub static ACCESS_CONTROL_ALLOW_HEADERS: HeaderKey<'static> =
+    HeaderKey::from_static("access-control-allow-headers");
 
-pub static ACCESS_CONTROL_ALLOW_METHODS: HeaderKey<'static> = HeaderKey::from_static("access-control-allow-methods");
+pub static ACCESS_CONTROL_ALLOW_METHODS: HeaderKey<'static> =
+    HeaderKey::from_static("access-control-allow-methods");
 
-pub static ACCESS_CONTROL_ALLOW_ORIGIN: HeaderKey<'static> = HeaderKey::from_static("access-control-allow-origin");
+pub static ACCESS_CONTROL_ALLOW_ORIGIN: HeaderKey<'static> =
+    HeaderKey::from_static("access-control-allow-origin");
 
-pub static ACCESS_CONTROL_EXPOSE_HEADERS: HeaderKey<'static> = HeaderKey::from_static("access-control-expose-headers");
+pub static ACCESS_CONTROL_EXPOSE_HEADERS: HeaderKey<'static> =
+    HeaderKey::from_static("access-control-expose-headers");
 
-pub static ACCESS_CONTROL_MAX_AGE: HeaderKey<'static> = HeaderKey::from_static("access-control-max-age");
+pub static ACCESS_CONTROL_MAX_AGE: HeaderKey<'static> =
+    HeaderKey::from_static("access-control-max-age");
 
-pub static ACCESS_CONTROL_REQUEST_HEADERS: HeaderKey<'static> = HeaderKey::from_static("access-control-request-headers");
+pub static ACCESS_CONTROL_REQUEST_HEADERS: HeaderKey<'static> =
+    HeaderKey::from_static("access-control-request-headers");
 
-pub static ACCESS_CONTROL_REQUEST_METHOD: HeaderKey<'static> = HeaderKey::from_static("access-control-request-method");
+pub static ACCESS_CONTROL_REQUEST_METHOD: HeaderKey<'static> =
+    HeaderKey::from_static("access-control-request-method");
 
 pub static AGE: HeaderKey<'static> = HeaderKey::from_static("age");
 
@@ -148,9 +169,11 @@ pub static CONTENT_LOCATION: HeaderKey<'static> = HeaderKey::from_static("conten
 
 pub static CONTENT_RANGE: HeaderKey<'static> = HeaderKey::from_static("content-range");
 
-pub static CONTENT_SECURITY_POLICY: HeaderKey<'static> = HeaderKey::from_static("content-security-policy");
+pub static CONTENT_SECURITY_POLICY: HeaderKey<'static> =
+    HeaderKey::from_static("content-security-policy");
 
-pub static CONTENT_SECURITY_POLICY_REPORT_ONLY: HeaderKey<'static> = HeaderKey::from_static("content-security-policy-report-only");
+pub static CONTENT_SECURITY_POLICY_REPORT_ONLY: HeaderKey<'static> =
+    HeaderKey::from_static("content-security-policy-report-only");
 
 pub static CONTENT_TYPE: HeaderKey<'static> = HeaderKey::from_static("content-type");
 
@@ -200,7 +223,8 @@ pub static PROXY_AUTHORIZATION: HeaderKey<'static> = HeaderKey::from_static("pro
 
 pub static PUBLIC_KEY_PINS: HeaderKey<'static> = HeaderKey::from_static("public-key-pins");
 
-pub static PUBLIC_KEY_PINS_REPORT_ONLY: HeaderKey<'static> = HeaderKey::from_static("public-key-pins-report-only");
+pub static PUBLIC_KEY_PINS_REPORT_ONLY: HeaderKey<'static> =
+    HeaderKey::from_static("public-key-pins-report-only");
 
 pub static RANGE: HeaderKey<'static> = HeaderKey::from_static("range");
 
@@ -212,21 +236,26 @@ pub static REFRESH: HeaderKey<'static> = HeaderKey::from_static("refresh");
 
 pub static RETRY_AFTER: HeaderKey<'static> = HeaderKey::from_static("retry-after");
 
-pub static SEC_WEBSOCKET_ACCEPT: HeaderKey<'static> = HeaderKey::from_static("sec-websocket-accept");
+pub static SEC_WEBSOCKET_ACCEPT: HeaderKey<'static> =
+    HeaderKey::from_static("sec-websocket-accept");
 
-pub static SEC_WEBSOCKET_EXTENSIONS: HeaderKey<'static> = HeaderKey::from_static("sec-websocket-extensions");
+pub static SEC_WEBSOCKET_EXTENSIONS: HeaderKey<'static> =
+    HeaderKey::from_static("sec-websocket-extensions");
 
 pub static SEC_WEBSOCKET_KEY: HeaderKey<'static> = HeaderKey::from_static("sec-websocket-key");
 
-pub static SEC_WEBSOCKET_PROTOCOL: HeaderKey<'static> = HeaderKey::from_static("sec-websocket-protocol");
+pub static SEC_WEBSOCKET_PROTOCOL: HeaderKey<'static> =
+    HeaderKey::from_static("sec-websocket-protocol");
 
-pub static SEC_WEBSOCKET_VERSION: HeaderKey<'static> = HeaderKey::from_static("sec-websocket-version");
+pub static SEC_WEBSOCKET_VERSION: HeaderKey<'static> =
+    HeaderKey::from_static("sec-websocket-version");
 
 pub static SERVER: HeaderKey<'static> = HeaderKey::from_static("server");
 
 pub static SET_COOKIE: HeaderKey<'static> = HeaderKey::from_static("set-cookie");
 
-pub static STRICT_TRANSPORT_SECURITY: HeaderKey<'static> = HeaderKey::from_static("strict-transport-security");
+pub static STRICT_TRANSPORT_SECURITY: HeaderKey<'static> =
+    HeaderKey::from_static("strict-transport-security");
 
 pub static TE: HeaderKey<'static> = HeaderKey::from_static("te");
 
@@ -238,7 +267,8 @@ pub static USER_AGENT: HeaderKey<'static> = HeaderKey::from_static("user-agent")
 
 pub static UPGRADE: HeaderKey<'static> = HeaderKey::from_static("upgrade");
 
-pub static UPGRADE_INSECURE_REQUESTS: HeaderKey<'static> = HeaderKey::from_static("upgrade-insecure-requests");
+pub static UPGRADE_INSECURE_REQUESTS: HeaderKey<'static> =
+    HeaderKey::from_static("upgrade-insecure-requests");
 
 pub static VARY: HeaderKey<'static> = HeaderKey::from_static("vary");
 
@@ -248,9 +278,11 @@ pub static WARNING: HeaderKey<'static> = HeaderKey::from_static("warning");
 
 pub static WWW_AUTHENTICATE: HeaderKey<'static> = HeaderKey::from_static("www-authenticate");
 
-pub static X_CONTENT_TYPE_OPTIONS: HeaderKey<'static> = HeaderKey::from_static("x-content-type-options");
+pub static X_CONTENT_TYPE_OPTIONS: HeaderKey<'static> =
+    HeaderKey::from_static("x-content-type-options");
 
-pub static X_DNS_PREFETCH_CONTROL: HeaderKey<'static> = HeaderKey::from_static("x-dns-prefetch-control");
+pub static X_DNS_PREFETCH_CONTROL: HeaderKey<'static> =
+    HeaderKey::from_static("x-dns-prefetch-control");
 
 pub static X_FRAME_OPTIONS: HeaderKey<'static> = HeaderKey::from_static("x-frame-options");
 
