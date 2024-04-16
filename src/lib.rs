@@ -8,8 +8,6 @@ extern crate std;
 extern crate alloc;
 
 mod prelude {
-    pub use crate::alloc::string::ToString;
-
     #[cfg(feature = "defmt")]
     pub use defmt::{debug, error, info, warn};
 

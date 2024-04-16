@@ -29,7 +29,7 @@ impl<'a> Uri<'a> {
         let authority = match s[start_idx..].find('/') {
             Some(idx) => {
                 let authority = start_idx..start_idx + idx;
-                start_idx = start_idx + idx;
+                start_idx += idx;
                 authority
             }
             None => {

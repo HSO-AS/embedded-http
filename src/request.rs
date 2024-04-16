@@ -1,4 +1,5 @@
 use core::write;
+use embedded_io::ErrorType;
 use embedded_io::Write;
 
 use alloc::vec::Vec;
@@ -8,14 +9,13 @@ use crate::{Error, Result};
 #[allow(unused_imports)]
 use crate::prelude::*;
 
-use crate::header::{HeaderValue, HeaderKey};
+use crate::header::{HeaderKey, HeaderValue};
 
 use core::fmt::Display;
 
 use crate::uri::Uri;
 
 static USER_AGENT: HeaderValue<'static> = HeaderValue::from_static(b":)");
-
 
 pub struct Request<'a, T> {
     pub header: Header<'a>,
@@ -47,7 +47,11 @@ impl<'a> Header<'a> {
         Header {
             method: self.method,
             uri: self.uri.into_owned(),
-            headers: self.headers.into_iter().map(|(k, v)| (k.into_owned(), v.into_owned())).collect(),
+            headers: self
+                .headers
+                .into_iter()
+                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .collect(),
         }
     }
 
@@ -55,7 +59,11 @@ impl<'a> Header<'a> {
         Header {
             method: self.method,
             uri: self.uri.into_borrowed(),
-            headers: self.headers.iter().map(|(k, v)| (k.into_borrowed(), v.into_borrowed())).collect(),
+            headers: self
+                .headers
+                .iter()
+                .map(|(k, v)| (k.into_borrowed(), v.into_borrowed()))
+                .collect(),
         }
     }
 }
@@ -95,32 +103,50 @@ impl<'a, T> Request<'a, T> {
     }
 }
 
-
 impl<'a, T> Request<'a, T> {
-    fn write_header<W: Write>(&self, mut w: W, extra_headers: &[(&HeaderKey, &HeaderValue)]) -> Result<(), Error> {
-        fn write_header_value<W: Write>(name: &HeaderKey, value: &HeaderValue, w: &mut W) -> Result<()> {
+    fn write_header<W: Write>(
+        &self,
+        mut w: W,
+        extra_headers: &[(&HeaderKey, &HeaderValue)],
+    ) -> Result<(), Error>
+    where
+        crate::error::Error: From<<W as ErrorType>::Error>,
+    {
+        fn write_header_value<W: Write>(
+            name: &HeaderKey,
+            value: &HeaderValue,
+            w: &mut W,
+        ) -> Result<()>
+        where
+            crate::error::Error: From<<W as ErrorType>::Error>,
+        {
             write!(w, "{}: ", name)?;
             w.write_all(value.as_ref())?;
             write!(w, "\r\n")?;
             Ok(())
         }
 
-        write!(w, "{} {} HTTP/1.1\r\n", &self.header.method, self.header.uri.path_and_query())?;
+        write!(
+            w,
+            "{} {} HTTP/1.1\r\n",
+            &self.header.method,
+            self.header.uri.path_and_query()
+        )?;
 
         // write host field
         write_header_value(
             &crate::header::HOST,
             &self.header.uri.authority().into(),
-            &mut w)?;
+            &mut w,
+        )?;
 
         // write user agent field
-        write_header_value(
-            &crate::header::USER_AGENT,
-            &USER_AGENT,
-            &mut w)?;
+        write_header_value(&crate::header::USER_AGENT, &USER_AGENT, &mut w)?;
 
-        for (name, value) in
-        self.header.headers.iter()
+        for (name, value) in self
+            .header
+            .headers
+            .iter()
             .filter(|(key, _)| key.ne(&crate::header::USER_AGENT))
             .filter(|(key, _)| key.ne(&crate::header::HOST))
         {
@@ -139,22 +165,29 @@ impl<'a, T> Request<'a, T> {
 
 #[cfg(feature = "serde_json")]
 impl<'a, T: Serialize> Request<'a, T> {
-    pub fn write_json_to<W: Write>(&self, mut w: W) -> Result<()> {
+    pub fn write_json_to<W: Write>(&self, mut w: W) -> Result<()>
+    where
+        crate::error::Error: From<<W as ErrorType>::Error>,
+    {
         let body = serde_json::to_string(&self.body)?;
 
         let mut b = itoa::Buffer::new();
         let cl = b.format(body.len());
-        self.write_header(&mut w, &[
-            (&crate::header::CONTENT_TYPE, &crate::mime::APPLICATION_JSON),
-            (&crate::header::CONTENT_LENGTH, &cl.into()),
-        ])?;
+        self.write_header(
+            &mut w,
+            &[
+                (&crate::header::CONTENT_TYPE, &crate::mime::APPLICATION_JSON),
+                (&crate::header::CONTENT_LENGTH, &cl.into()),
+            ],
+        )?;
 
         w.write_all(body.as_bytes())?;
 
-
         Ok(())
     }
-
+}
+#[cfg(feature = "serde_json")]
+impl<'a, T: Serialize> Request<'a, T> {
     pub fn to_json_vec(&self) -> Result<Vec<u8>> {
         let mut buf = Vec::new();
         self.write_json_to(&mut buf)?;
@@ -162,9 +195,11 @@ impl<'a, T: Serialize> Request<'a, T> {
     }
 }
 
-
 impl<'a, T: ToRequestBody> Request<'a, T> {
-    pub fn write_to<W: Write>(&self, mut w: W) -> Result<()> {
+    pub fn write_to<W: Write>(&self, mut w: W) -> Result<()>
+    where
+        crate::error::Error: From<<W as ErrorType>::Error>,
+    {
         // If there is no content type, we can just write the header and be done
         let ct = if let Some(ct) = self.body.content_type() {
             ct
@@ -180,16 +215,22 @@ impl<'a, T: ToRequestBody> Request<'a, T> {
             cl
         } else {
             let mut body_inner = Vec::new();
-            self.body.write_body(&mut body_inner)?;
+            self.body.write_body::<&mut Vec<u8>>(body_inner.as_mut())?;
             let cl = body_inner.len();
             body = Some(body_inner);
             cl
         };
 
-        self.write_header(&mut w, &[
-            (&crate::header::CONTENT_TYPE, &ct.into()),
-            (&crate::header::CONTENT_LENGTH, &itoa::Buffer::new().format(cl).into()),
-        ])?;
+        self.write_header(
+            &mut w,
+            &[
+                (&crate::header::CONTENT_TYPE, &ct),
+                (
+                    &crate::header::CONTENT_LENGTH,
+                    &itoa::Buffer::new().format(cl).into(),
+                ),
+            ],
+        )?;
 
         if let Some(b) = body {
             w.write_all(&b)?;
@@ -208,7 +249,9 @@ impl<'a, T: ToRequestBody> Request<'a, T> {
 }
 
 pub trait ToRequestBody {
-    fn write_body<W: Write>(&self, w: W) -> Result<()>;
+    fn write_body<W: Write>(&self, w: W) -> Result<()>
+    where
+        crate::error::Error: From<<W as ErrorType>::Error>;
 
     fn content_type(&self) -> Option<HeaderValue<'_>>;
 
@@ -218,11 +261,14 @@ pub trait ToRequestBody {
 }
 
 impl<B: ToRequestBody> ToRequestBody for &B {
-    fn write_body<W: Write>(&self, w: W) -> Result<()> {
+    fn write_body<W: Write>(&self, w: W) -> Result<()>
+    where
+        crate::error::Error: From<<W as ErrorType>::Error>,
+    {
         (*self).write_body(w)
     }
 
-    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
+    fn content_type(&self) -> Option<HeaderValue> {
         (*self).content_type()
     }
 
@@ -236,17 +282,20 @@ impl ToRequestBody for () {
         Ok(())
     }
 
-    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
+    fn content_type(&self) -> Option<HeaderValue> {
         None
     }
 }
 
 impl<'body> ToRequestBody for &'body str {
-    fn write_body<W: Write>(&self, mut w: W) -> Result<()> {
+    fn write_body<W: Write>(&self, mut w: W) -> Result<()>
+    where
+        crate::error::Error: From<<W as ErrorType>::Error>,
+    {
         Ok(w.write_all(self.as_bytes())?)
     }
 
-    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
+    fn content_type(&self) -> Option<HeaderValue> {
         Some(crate::mime::TEXT_PLAIN_UTF_8.into_borrowed())
     }
 
@@ -256,11 +305,14 @@ impl<'body> ToRequestBody for &'body str {
 }
 
 impl<'body> ToRequestBody for &'body [u8] {
-    fn write_body<W: Write>(&self, mut w: W) -> Result<()> {
+    fn write_body<W: Write>(&self, mut w: W) -> Result<()>
+    where
+        crate::error::Error: From<<W as ErrorType>::Error>,
+    {
         Ok(w.write_all(self)?)
     }
 
-    fn content_type<'a>(&'a self) -> Option<HeaderValue<'a>> {
+    fn content_type(&self) -> Option<HeaderValue> {
         Some(crate::mime::APPLICATION_OCTET_STREAM.into_borrowed())
     }
 
@@ -268,7 +320,6 @@ impl<'body> ToRequestBody for &'body [u8] {
         Some(self.len())
     }
 }
-
 
 pub struct RequestBuilder<'a> {
     headers: Vec<(HeaderKey<'a>, HeaderValue<'a>)>,
@@ -321,8 +372,6 @@ impl<'a> RequestBuilder<'a> {
         self.body(())
     }
 }
-
-
 
 /*
 impl<T> Request<'a, D> {
@@ -417,19 +466,17 @@ impl<'a, const D: usize> Request<'a, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "alloc")]
-    use alloc::vec::Vec;
-
     use core::str::from_utf8;
 
     #[test]
     fn build_no_body() {
-        let req = RequestBuilder::get("https://api.aqsense.no/v1/health").unwrap().body(());
+        let req = RequestBuilder::get("https://api.aqsense.no/v1/health")
+            .unwrap()
+            .body(());
 
         let buf = req.to_vec().unwrap();
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
-
 
         let mut headers = [httparse::EMPTY_HEADER; 16];
         let mut req = httparse::Request::new(&mut headers);
@@ -442,7 +489,10 @@ mod tests {
         assert_eq!(req.version.unwrap(), 1);
 
         // check content type
-        assert!(!req.headers.iter().any(|header| header.name == http::header::CONTENT_TYPE));
+        assert!(!req
+            .headers
+            .iter()
+            .any(|header| header.name == http::header::CONTENT_TYPE));
 
         // check validity of request
         assert!(body_status.is_complete());
@@ -454,7 +504,9 @@ mod tests {
     #[test]
     fn build_str_body() {
         let body = "hei";
-        let req = RequestBuilder::post("https://google.com/").unwrap().body(body);
+        let req = RequestBuilder::post("https://google.com/")
+            .unwrap()
+            .body(body);
 
         let buf = req.to_vec().unwrap();
 
@@ -471,7 +523,11 @@ mod tests {
         assert_eq!(req.version.unwrap(), 1);
 
         // check content type
-        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        let ct = req
+            .headers
+            .iter()
+            .find(|header| header.name == http::header::CONTENT_TYPE)
+            .unwrap();
         assert_eq!(ct.value, crate::mime::TEXT_PLAIN_UTF_8.as_ref());
 
         // check validity of request
@@ -484,7 +540,9 @@ mod tests {
     #[test]
     fn build_byte_body() {
         let body = b"hei";
-        let req = RequestBuilder::post("https://google.com/").unwrap().body(body.as_slice());
+        let req = RequestBuilder::post("https://google.com/")
+            .unwrap()
+            .body(body.as_slice());
 
         let buf = req.to_vec().unwrap();
 
@@ -501,8 +559,15 @@ mod tests {
         assert_eq!(req.version.unwrap(), 1);
 
         // check content type
-        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
-        assert_eq!(ct.value, crate::mime::APPLICATION_OCTET_STREAM.inner.as_ref());
+        let ct = req
+            .headers
+            .iter()
+            .find(|header| header.name == http::header::CONTENT_TYPE)
+            .unwrap();
+        assert_eq!(
+            ct.value,
+            crate::mime::APPLICATION_OCTET_STREAM.inner.as_ref()
+        );
 
         // check validity of request
         assert!(body_status.is_complete());
@@ -515,7 +580,9 @@ mod tests {
     #[test]
     fn build_json_body() {
         let body = "hei";
-        let req = RequestBuilder::post("https://google.com/").unwrap().body(body);
+        let req = RequestBuilder::post("https://google.com/")
+            .unwrap()
+            .body(body);
 
         let buf = req.to_json_vec().unwrap();
 
@@ -532,19 +599,27 @@ mod tests {
         assert_eq!(req.version.unwrap(), 1);
 
         // check content type
-        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        let ct = req
+            .headers
+            .iter()
+            .find(|header| header.name == http::header::CONTENT_TYPE)
+            .unwrap();
         assert_eq!(ct.value, crate::mime::APPLICATION_JSON.as_ref());
 
         // check validity of request
         assert!(body_status.is_complete());
 
         // check body
-        let recv_body: serde_json::Value = serde_json::from_slice(&buf[body_status.unwrap()..]).unwrap();
+        let recv_body: serde_json::Value =
+            serde_json::from_slice(&buf[body_status.unwrap()..]).unwrap();
         assert_eq!(recv_body, body);
     }
 
     #[derive(Debug, PartialEq, Eq, Default, Clone, Copy)]
-    #[cfg_attr(feature = "serde_json", derive(serde_derive::Serialize, serde_derive::Deserialize))]
+    #[cfg_attr(
+        feature = "serde_json",
+        derive(serde_derive::Serialize, serde_derive::Deserialize)
+    )]
     #[repr(packed)]
     struct TestStruct {
         a: u32,
@@ -553,18 +628,31 @@ mod tests {
 
     impl AsRef<[u8]> for TestStruct {
         fn as_ref(&self) -> &[u8] {
-            unsafe { std::slice::from_raw_parts(self as *const _ as *const u8, std::mem::size_of::<Self>()) }
+            unsafe {
+                std::slice::from_raw_parts(
+                    self as *const _ as *const u8,
+                    std::mem::size_of::<Self>(),
+                )
+            }
         }
     }
 
     impl AsMut<[u8]> for TestStruct {
         fn as_mut(&mut self) -> &mut [u8] {
-            unsafe { std::slice::from_raw_parts_mut(self as *mut _ as *mut u8, std::mem::size_of::<Self>()) }
+            unsafe {
+                std::slice::from_raw_parts_mut(
+                    self as *mut _ as *mut u8,
+                    std::mem::size_of::<Self>(),
+                )
+            }
         }
     }
 
     impl ToRequestBody for TestStruct {
-        fn write_body<W: Write>(&self, mut w: W) -> Result<()> {
+        fn write_body<W: Write>(&self, mut w: W) -> Result<()>
+        where
+            crate::error::Error: From<<W as ErrorType>::Error>,
+        {
             Ok(w.write_all(self.as_ref())?)
         }
 
@@ -580,10 +668,11 @@ mod tests {
     #[test]
     fn build_custom() {
         let body = TestStruct { a: 1, b: 2 };
-        let req = RequestBuilder::post("https://google.com/").unwrap().body(&body);
+        let req = RequestBuilder::post("https://google.com/")
+            .unwrap()
+            .body(&body);
 
         let buf = req.to_vec().unwrap();
-
 
         println!("{}", from_utf8(buf.as_slice()).unwrap());
 
@@ -598,7 +687,11 @@ mod tests {
         assert_eq!(req.version.unwrap(), 1);
 
         // check content type
-        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        let ct = req
+            .headers
+            .iter()
+            .find(|header| header.name == http::header::CONTENT_TYPE)
+            .unwrap();
         assert_eq!(from_utf8(ct.value).unwrap(), "application/test");
 
         // check validity of request
@@ -609,17 +702,19 @@ mod tests {
 
         assert_eq!(&buf[body_status.unwrap()..], body.as_ref());
 
-        new_body.as_mut().copy_from_slice(&buf[body_status.unwrap()..]);
+        new_body
+            .as_mut()
+            .copy_from_slice(&buf[body_status.unwrap()..]);
         assert_eq!(new_body, body);
     }
-
 
     #[cfg(feature = "serde_json")]
     #[test]
     fn build_custom_json() {
         let body = TestStruct { a: 1, b: 2 };
-        let req = RequestBuilder::post("https://google.com/").unwrap().body(&body);
-
+        let req = RequestBuilder::post("https://google.com/")
+            .unwrap()
+            .body(&body);
 
         let buf = req.to_json_vec().unwrap();
 
@@ -636,7 +731,11 @@ mod tests {
         assert_eq!(req.version.unwrap(), 1);
 
         // check content type
-        let ct = req.headers.iter().find(|header| header.name == http::header::CONTENT_TYPE).unwrap();
+        let ct = req
+            .headers
+            .iter()
+            .find(|header| header.name == http::header::CONTENT_TYPE)
+            .unwrap();
         assert_eq!(ct.value, crate::mime::APPLICATION_JSON.as_ref());
 
         // check validity of request

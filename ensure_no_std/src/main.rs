@@ -19,7 +19,7 @@ unsafe fn main() -> ! {
     let heap = [0u8; 1024];
     unsafe { ALLOCATOR.init((&heap) as *const u8 as usize, heap.len()) }
 
-    loop {}
+    panic!("");
 }
 
 #[alloc_error_handler]

@@ -26,14 +26,20 @@ impl defmt::Format for ResponseError {
                 defmt::write!(fmt, "Utf8Error()");
 
                 #[cfg(feature = "alloc")]
-                defmt::write!(fmt, "Utf8Error({})", e.to_string());
+                {
+                    use alloc::string::ToString;
+                    defmt::write!(fmt, "Utf8Error({})", e.to_string());
+                }
             }
             ResponseError::ParseIntError(e) => {
                 #[cfg(not(feature = "alloc"))]
                 defmt::write!(fmt, "ParseIntError()");
 
                 #[cfg(feature = "alloc")]
-                defmt::write!(fmt, "ParseIntError({})", e.to_string());
+                {
+                    use alloc::string::ToString;
+                    defmt::write!(fmt, "ParseIntError({})", e.to_string());
+                }
             }
             ResponseError::HeaderNotFound => {
                 defmt::write!(fmt, "HeaderNotFound");
@@ -49,7 +55,10 @@ impl defmt::Format for ResponseError {
                 defmt::write!(fmt, "ParseError()");
 
                 #[cfg(feature = "alloc")]
-                defmt::write!(fmt, "ParseError({})", e.to_string());
+                {
+                    use alloc::string::ToString;
+                    defmt::write!(fmt, "ParseError({})", e.to_string());
+                }
             }
         }
     }
@@ -145,11 +154,18 @@ impl<'a> Response<'a> {
     }
 
     /// Find the first line which contains the marker in the header, and returns the remainding string
-    /// excluding the '\r' character
+    /// This function is case insensitive on the marker
     fn find_header_value<'b>(&mut self, marker: &'b str) -> Result<&'a str> {
-        for line in self.header()?.split('\n') {
-            if let Some(idx) = line.find(marker) {
-                return Ok(&line[idx + marker.len()..line.len() - 1]);
+        for line in self.header()?.lines() {
+            if line.len() < marker.len() {
+                continue;
+            }
+            if line
+                .chars()
+                .zip(marker.chars())
+                .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
+            {
+                return Ok(&line[marker.len()..line.len()]);
             }
         }
 
@@ -228,7 +244,13 @@ impl<'a> Response<'a> {
     /// Extract the header of the response
     /// returns None if no content length is found or header is invalid utf8
     pub fn header(&mut self) -> Result<&'a str> {
-        Ok(from_utf8(&self.inner[..self.header_len()?])?)
+        Ok(from_utf8(self.header_bytes()?)?)
+    }
+
+    /// Extract the header of the response
+    /// returns None if no content length is found or header is invalid utf8
+    pub fn header_bytes(&mut self) -> Result<&'a [u8]> {
+        Ok(self.inner[..self.header_len()?].as_ref())
     }
 }
 
@@ -254,20 +276,30 @@ mod tests {
 
     const SIMPLE_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\ndate: Wed, 28 Sep 2022 08:23:31 GMT\r\n\r\n";
     const BODY_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 132\r\nvary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers\r\ncontent-type: application/json\r\ndate: Wed, 28 Sep 2022 09:00:53 GMT\r\n\r\n{\"status_code\":200,\"canonical_reason\":\"OK\",\"data\":\"tap.it backend built with rustc version 1.63.0 at 2022-09-05\",\"description\":null}";
+    const BODY_RESPONSE_2: &[u8] = b"HTTP/1.1 200 OK\r\nDate: Tue, 16 Apr 2024 11:18:11 GMT\r\nContent-Length: 36\r\nConnection: keep-alive\r\nvary: Origin, Access-Control-Request-Method, Access-Control-Request-Headers\r\n\r\n0ab5df47-4d09-493f-afa5-72f15d8edbc9";
 
     const NO_CONTENT: &[u8] = b"HTTP/1.1 204 No Content\r\nconnection: close\r\ndate: Wed, 30 Nov 2022 10:29:55 GMT\r\n\r\n";
 
     #[test]
     fn deserialize_date() {
         let mut resp = Response::new(SIMPLE_RESPONSE);
+        let mut resp2 = Response::new(BODY_RESPONSE_2);
 
         let expected_date = NaiveDateTime::new(
             chrono::NaiveDate::from_ymd_opt(2022, 9, 28).unwrap(),
             chrono::NaiveTime::from_hms_opt(8, 23, 31).unwrap(),
         )
-            .and_utc();
+        .and_utc();
 
         let date = resp.date().unwrap();
+        assert_eq!(date, expected_date);
+
+        let date = resp2.date().unwrap();
+        let expected_date = NaiveDateTime::new(
+            chrono::NaiveDate::from_ymd_opt(2024, 4, 16).unwrap(),
+            chrono::NaiveTime::from_hms_opt(11, 18, 11).unwrap(),
+        )
+        .and_utc();
         assert_eq!(date, expected_date);
     }
 
@@ -297,6 +329,24 @@ mod tests {
         assert_eq!(resp.content_length().unwrap(), 132);
 
         assert_eq!(resp.content_type().unwrap(), Some("application/json"));
+
+        println!("header: {}", header);
+        println!("body: {}", from_utf8(body).unwrap());
+
+        println!("status_code: {}", resp.status_code().unwrap())
+    }
+
+    #[test]
+    fn deserialize_body_2() {
+        let mut resp = Response::new(BODY_RESPONSE_2);
+        let header = resp.header().unwrap();
+        let body = resp.body().unwrap();
+
+        assert_eq!(resp.status_code().unwrap(), 200);
+
+        assert_eq!(resp.content_length().unwrap(), 36);
+
+        assert_eq!(resp.content_type().unwrap(), None);
 
         println!("header: {}", header);
         println!("body: {}", from_utf8(body).unwrap());
